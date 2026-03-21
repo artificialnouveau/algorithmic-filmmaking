@@ -317,14 +317,16 @@ def handle_url_import(
 def handle_detect_scenes(
     sensitivity: float,
     state: SessionState,
+    progress=None,
 ) -> tuple[SessionState, list[tuple[str, str]], str]:
     """Run scene detection on all unanalyzed sources."""
+    import gradio as gr
+
     if not state.sources:
         return state, [], "No videos imported yet. Go to the **Collect** tab first."
 
     unanalyzed = [s for s in state.sources if not s.analyzed]
     if not unanalyzed:
-        # Return existing thumbnails
         gallery = _build_gallery(state)
         return state, gallery, "All videos already analyzed. Showing existing clips."
 
@@ -332,10 +334,12 @@ def handle_detect_scenes(
     detector = SceneDetector(config)
     total_new_clips = 0
 
-    for source in unanalyzed:
+    for si, source in enumerate(unanalyzed):
         try:
+            if progress:
+                progress(si / len(unanalyzed), desc=f"Detecting scenes in {source.filename}...")
+
             detected_source, clips = detector.detect_scenes(source.file_path)
-            # Update source metadata from detection
             source.fps = detected_source.fps
             source.duration_seconds = detected_source.duration_seconds
             source.width = detected_source.width
@@ -343,12 +347,16 @@ def handle_detect_scenes(
             source.analyzed = True
             source.color_profile = detected_source.color_profile
 
-            # Update clip source IDs to match our source
             for clip in clips:
                 clip.source_id = source.id
 
-            # Generate thumbnails
-            for clip in clips:
+            # Generate thumbnails with progress
+            for ci, clip in enumerate(clips):
+                if progress:
+                    progress(
+                        (si + (ci / len(clips))) / len(unanalyzed),
+                        desc=f"Generating thumbnails... {ci+1}/{len(clips)}",
+                    )
                 try:
                     thumb = state.thumbnail_generator.generate_clip_thumbnail(
                         video_path=source.file_path,
@@ -367,7 +375,12 @@ def handle_detect_scenes(
 
         except Exception as e:
             logger.error(f"Scene detection failed for {source.file_path}: {e}")
+            import traceback
+            traceback.print_exc()
             return state, [], f"Error detecting scenes in {source.filename}: {e}"
+
+    if progress:
+        progress(1.0, desc="Done!")
 
     gallery = _build_gallery(state)
     return (
@@ -508,18 +521,25 @@ def handle_export(
 
 def handle_analyze_colors(
     state: SessionState,
+    progress=None,
 ) -> tuple[SessionState, list[tuple[str, str]], str]:
     """Run color analysis on all clips."""
     if not state.clips:
         return state, [], "No clips to analyze. Detect scenes first."
 
-    from core.analysis.color import extract_dominant_colors
+    try:
+        from core.analysis.color import extract_dominant_colors
+    except ImportError as e:
+        return state, [], f"Missing dependency for color analysis: {e}. Try `pip install scikit-learn`."
 
     src_map = state.sources_by_id()
     analyzed = 0
     skipped = 0
+    total = len(state.clips)
 
-    for clip in state.clips:
+    for i, clip in enumerate(state.clips):
+        if progress:
+            progress(i / total, desc=f"Analyzing colors... {i+1}/{total}")
         if clip.dominant_colors:
             skipped += 1
             continue
@@ -537,6 +557,9 @@ def handle_analyze_colors(
         except Exception as e:
             logger.warning(f"Color analysis failed for clip {clip.id}: {e}")
 
+    if progress:
+        progress(1.0, desc="Done!")
+
     gallery = _build_gallery(state)
     msg = f"Color analysis complete: **{analyzed}** clips analyzed"
     if skipped:
@@ -546,22 +569,27 @@ def handle_analyze_colors(
 
 def handle_analyze_shots(
     state: SessionState,
+    progress=None,
 ) -> tuple[SessionState, list[tuple[str, str]], str]:
     """Run shot type classification on all clips."""
     if not state.clips:
         return state, [], "No clips to analyze. Detect scenes first."
 
-    from core.analysis.shots import classify_shot_type_tiered
+    try:
+        from core.analysis.shots import classify_shot_type_tiered
+    except ImportError as e:
+        return state, [], f"Missing dependency for shot classification: {e}. Try `pip install transformers torch`."
 
-    src_map = state.sources_by_id()
     analyzed = 0
     skipped = 0
+    total = len(state.clips)
 
-    for clip in state.clips:
+    for i, clip in enumerate(state.clips):
+        if progress:
+            progress(i / total, desc=f"Classifying shots... {i+1}/{total}")
         if clip.shot_type:
             skipped += 1
             continue
-        # Need a thumbnail to classify
         thumb = state.clip_thumbnails.get(clip.id)
         if not thumb or not Path(thumb).exists():
             continue
@@ -574,6 +602,9 @@ def handle_analyze_shots(
         except Exception as e:
             logger.warning(f"Shot classification failed for clip {clip.id}: {e}")
 
+    if progress:
+        progress(1.0, desc="Done!")
+
     gallery = _build_gallery(state)
     msg = f"Shot classification complete: **{analyzed}** clips classified"
     if skipped:
@@ -583,18 +614,25 @@ def handle_analyze_shots(
 
 def handle_analyze_transcribe(
     state: SessionState,
+    progress=None,
 ) -> tuple[SessionState, str]:
     """Run transcription on all clips."""
     if not state.clips:
         return state, "No clips to transcribe. Detect scenes first."
 
-    from core.transcription import transcribe_clip
+    try:
+        from core.transcription import transcribe_clip
+    except ImportError as e:
+        return state, f"Missing dependency for transcription: {e}. Try `pip install faster-whisper`."
 
     src_map = state.sources_by_id()
     transcribed = 0
     skipped = 0
+    total = len(state.clips)
 
-    for clip in state.clips:
+    for i, clip in enumerate(state.clips):
+        if progress:
+            progress(i / total, desc=f"Transcribing... {i+1}/{total}")
         if clip.transcript:
             skipped += 1
             continue
@@ -612,6 +650,9 @@ def handle_analyze_transcribe(
         except Exception as e:
             logger.warning(f"Transcription failed for clip {clip.id}: {e}")
 
+    if progress:
+        progress(1.0, desc="Done!")
+
     msg = f"Transcription complete: **{transcribed}** clips transcribed"
     if skipped:
         msg += f", {skipped} skipped (already transcribed)"
@@ -621,17 +662,24 @@ def handle_analyze_transcribe(
 def handle_analyze_describe(
     tier: str,
     state: SessionState,
+    progress=None,
 ) -> tuple[SessionState, str]:
     """Run description generation on all clips."""
     if not state.clips:
         return state, "No clips to describe. Detect scenes first."
 
-    from core.analysis.description import describe_frame
+    try:
+        from core.analysis.description import describe_frame
+    except ImportError as e:
+        return state, f"Missing dependency for descriptions: {e}."
 
     described = 0
     skipped = 0
+    total = len(state.clips)
 
-    for clip in state.clips:
+    for i, clip in enumerate(state.clips):
+        if progress:
+            progress(i / total, desc=f"Describing... {i+1}/{total}")
         if clip.description:
             skipped += 1
             continue
@@ -649,6 +697,9 @@ def handle_analyze_describe(
         except Exception as e:
             logger.warning(f"Description failed for clip {clip.id}: {e}")
 
+    if progress:
+        progress(1.0, desc="Done!")
+
     msg = f"Description complete: **{described}** clips described"
     if skipped:
         msg += f", {skipped} skipped (already described)"
@@ -659,22 +710,29 @@ def handle_extract_frames(
     mode: str,
     interval: int,
     state: SessionState,
+    progress=None,
 ) -> tuple[SessionState, list[tuple[str, str]], str]:
     """Extract frames from all clips."""
     if not state.clips:
         return state, [], "No clips available. Detect scenes first."
 
-    from core.ffmpeg import FFmpegProcessor
-    from models.frame import Frame
+    try:
+        from core.ffmpeg import extract_frames_batch
+        from models.frame import Frame
+    except ImportError as e:
+        return state, [], f"Missing dependency: {e}"
 
     src_map = state.sources_by_id()
     frames_dir = state.temp_dir / "frames"
     frames_dir.mkdir(parents=True, exist_ok=True)
 
-    proc = FFmpegProcessor()
     total_frames = 0
+    total_clips = len(state.clips)
 
-    for clip in state.clips:
+    for ci, clip in enumerate(state.clips):
+        if progress:
+            progress(ci / total_clips, desc=f"Extracting frames from clip {ci+1}/{total_clips}...")
+
         source = src_map.get(clip.source_id)
         if not source:
             continue
@@ -683,7 +741,6 @@ def handle_extract_frames(
         clip_frames_dir.mkdir(parents=True, exist_ok=True)
 
         try:
-            from core.ffmpeg import extract_frames_batch
             extracted = extract_frames_batch(
                 video_path=source.file_path,
                 output_dir=clip_frames_dir,
@@ -707,11 +764,14 @@ def handle_extract_frames(
         except Exception as e:
             logger.warning(f"Frame extraction failed for clip {clip.id}: {e}")
 
+    if progress:
+        progress(1.0, desc="Done!")
+
     gallery = _build_frames_gallery(state)
     return (
         state,
         gallery,
-        f"Extracted **{total_frames}** frames from {len(state.clips)} clips.",
+        f"Extracted **{total_frames}** frames from {total_clips} clips.",
     )
 
 

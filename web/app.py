@@ -397,6 +397,7 @@ def main():
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     )
     app = create_app()
+    app.queue()
     app.launch(
         server_name="0.0.0.0",
         server_port=7860,
