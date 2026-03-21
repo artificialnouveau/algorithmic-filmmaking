@@ -9,10 +9,14 @@ license = {text = "MIT"}
 [project.scripts]
 scene_ripper = "cli.main:main"
 scene-ripper-mcp = "scene_ripper_mcp.server:main"
+scene-ripper-web = "web.app:main"
 
 [project.optional-dependencies]
 mcp = [
     "mcp[cli]>=1.2.0",
+]
+web = [
+    "gradio>=4.0",
 ]
 
 [build-system]
@@ -20,7 +24,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["cli*", "core*", "models*", "ui*", "scene_ripper_mcp*"]
+include = ["cli*", "core*", "models*", "ui*", "web*", "scene_ripper_mcp*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
