@@ -7,6 +7,13 @@ Once your Codespace is open, run these commands in the terminal:
 ```bash
 pip install gradio
 curl -fsSL https://deno.land/install.sh | sh
+```
+
+When Deno asks **"Edit shell configs to add deno to the PATH? (Y/n)"**, press **Y** then **Enter**.
+
+Then run:
+
+```bash
 export PATH="$HOME/.deno/bin:$PATH"
 python -m web.app
 ```
