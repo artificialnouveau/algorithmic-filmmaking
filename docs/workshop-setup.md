@@ -2,22 +2,12 @@
 
 ## Quick Start
 
-Once your Codespace is open, run these commands in the terminal:
+1. Go to **https://github.com/artificialnouveau/algorithmic-filmmaking**
+2. Click the green **Code** button → **Codespaces** → **Create codespace on main**
+3. Wait for setup to finish (~3-5 minutes — it installs everything automatically)
+4. Scene Ripper opens in your browser automatically!
 
-```bash
-pip install -r requirements-web.txt && curl -fsSL https://deno.land/install.sh | sh
-```
-
-When Deno asks **"Edit shell configs to add deno to the PATH? (Y/n)"**, press **Y** then **Enter**.
-
-Then run:
-
-```bash
-export PATH="$HOME/.deno/bin:$PATH"
-python -m web.app
-```
-
-Then go to the **PORTS** tab in the bottom panel, find port **7860**, right-click → set visibility to **Public**, and click the globe icon to open Scene Ripper.
+That's it. No terminal commands needed.
 
 ---
 
@@ -27,7 +17,7 @@ Then go to the **PORTS** tab in the bottom panel, find port **7860**, right-clic
 - A modern web browser (Chrome, Firefox, Safari, Edge)
 - That's it — no downloads, no installs
 
-## Getting Started (2 minutes)
+## Getting Started
 
 ### Step 1: Open the Codespace
 
@@ -39,56 +29,23 @@ Click the green **Code** button, then the **Codespaces** tab, then **Create code
 
 ![Create Codespace](https://docs.github.com/assets/cb-49943/mw-1440/images/help/codespaces/new-codespace-button.webp)
 
-A VS Code editor will open in your browser. Wait for the setup to finish — you'll see a message in the terminal that says **"Setup complete!"** (this takes about 2 minutes).
+A VS Code editor will open in your browser. Everything installs automatically — FFmpeg, Python packages, ML models. You'll see progress in the terminal. This takes about **3-5 minutes** the first time.
 
-### Step 2: Install Gradio
+### Step 2: Open Scene Ripper
 
-In the terminal at the bottom of the screen, run:
+When setup finishes, Scene Ripper launches automatically and your browser should open a new tab.
 
-```
-pip install -r requirements-web.txt && curl -fsSL https://deno.land/install.sh | sh
-```
-
-When Deno asks **"Edit shell configs to add deno to the PATH? (Y/n)"**, press **Y** then **Enter**.
-
-Then run:
-
-```
-export PATH="$HOME/.deno/bin:$PATH"
-```
-
-This installs all dependencies (may take 2-3 minutes).
-
-### Step 3: Launch Scene Ripper
-
-In the same terminal, type:
-
-```
-python -m web.app
-```
-
-You should see output that says:
-
-```
-Running on local URL:  http://0.0.0.0:7860
-```
-
-A popup may appear in the bottom-right corner saying **"Port 7860 is available"**. If it does, click **Open in Browser**.
-
-**If you don't see the popup** (this is common), follow these steps to find the URL:
+**If it doesn't open automatically**, find the URL manually:
 
 1. Look at the **bottom panel** of the editor where your terminal is
-2. You'll see tabs along the top of this panel: **TERMINAL**, **PROBLEMS**, **OUTPUT**, **DEBUG CONSOLE**, **PORTS**
+2. You'll see tabs along the top: **TERMINAL**, **PROBLEMS**, **OUTPUT**, **DEBUG CONSOLE**, **PORTS**
 3. Click the **PORTS** tab
 4. Find port **7860** in the list
-5. Hover over the **Forwarded Address** column — you'll see a URL like `https://your-codespace-name-7860.app.github.dev`
-6. Click the **globe icon** (or the URL itself) to open Scene Ripper in a new tab
-
-> **Important:** Right-click on port 7860 in the Ports tab and set **Port Visibility** to **Public**. If it's set to Private, the app buttons may not respond.
+5. Click the **globe icon** (or the URL) to open Scene Ripper
 
 **Still can't find the Ports tab?** Press `Ctrl+Shift+P` (or `Cmd+Shift+P` on Mac), type **"Ports: Focus on Ports View"**, and press Enter.
 
-### Step 4: You're in!
+### Step 3: You're in!
 
 Scene Ripper is now running in your browser. You have your own private instance with full processing power.
 
