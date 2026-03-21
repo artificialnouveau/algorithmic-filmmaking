@@ -64,6 +64,63 @@ def create_app() -> gr.Blocks:
         # Session state — initialize directly so it's ready on first click
         state = gr.State(value=SessionState())
 
+        # API Keys section at the top level
+        with gr.Accordion("API Keys (optional — for cloud AI features)", open=False):
+            gr.Markdown(
+                "These keys enable cloud-based AI features like descriptions and chat. "
+                "**All keys are optional** — local features (scene detection, colors, transcription) "
+                "work without any keys. Keys are only stored in your session and never saved."
+            )
+            with gr.Row():
+                openai_key = gr.Textbox(
+                    label="OpenAI API Key",
+                    placeholder="sk-...",
+                    type="password",
+                )
+                anthropic_key = gr.Textbox(
+                    label="Anthropic API Key",
+                    placeholder="sk-ant-...",
+                    type="password",
+                )
+            with gr.Row():
+                gemini_key = gr.Textbox(
+                    label="Google Gemini API Key",
+                    placeholder="AIza...",
+                    type="password",
+                )
+                replicate_key = gr.Textbox(
+                    label="Replicate API Key (cloud shot classification)",
+                    placeholder="r8_...",
+                    type="password",
+                )
+
+            def save_api_keys(openai, anthropic, gemini, replicate):
+                import os
+                if openai and openai.strip():
+                    os.environ["OPENAI_API_KEY"] = openai.strip()
+                if anthropic and anthropic.strip():
+                    os.environ["ANTHROPIC_API_KEY"] = anthropic.strip()
+                if gemini and gemini.strip():
+                    os.environ["GEMINI_API_KEY"] = gemini.strip()
+                if replicate and replicate.strip():
+                    os.environ["REPLICATE_API_TOKEN"] = replicate.strip()
+                keys_set = []
+                if openai and openai.strip(): keys_set.append("OpenAI")
+                if anthropic and anthropic.strip(): keys_set.append("Anthropic")
+                if gemini and gemini.strip(): keys_set.append("Gemini")
+                if replicate and replicate.strip(): keys_set.append("Replicate")
+                if keys_set:
+                    return f"Keys saved: {', '.join(keys_set)}"
+                return ""
+
+            save_keys_btn = gr.Button("Save Keys", variant="secondary")
+            keys_status = gr.Markdown("")
+            save_keys_btn.click(
+                fn=save_api_keys,
+                inputs=[openai_key, anthropic_key, gemini_key, replicate_key],
+                outputs=[keys_status],
+            )
+
         with gr.Tabs():
             # === COLLECT TAB ===
             with gr.Tab("Collect", id="collect"):
