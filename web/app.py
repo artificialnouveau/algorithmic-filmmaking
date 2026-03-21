@@ -40,6 +40,20 @@ and may help with rate limits.
 (a search costs 100 units, so ~100 searches/day).
 """
 
+COOKIES_HELP = """
+### YouTube Cookies (if downloads are blocked)
+
+If YouTube says **"Sign in to confirm you're not a bot"**, you need to provide a cookies file:
+
+1. Install the **Get cookies.txt LOCALLY** browser extension
+   ([Chrome](https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc))
+2. Go to [youtube.com](https://youtube.com) and make sure you're signed in
+3. Click the extension icon and click **Export** to download `cookies.txt`
+4. Upload that file here
+
+The cookies let yt-dlp authenticate as you, bypassing YouTube's bot detection.
+"""
+
 
 def create_app() -> gr.Blocks:
     """Create the Gradio app."""
@@ -55,13 +69,19 @@ def create_app() -> gr.Blocks:
             with gr.Tab("Collect", id="collect"):
                 gr.Markdown("### Import Videos")
 
-                # YouTube API Key at the top
-                with gr.Accordion("YouTube API Key (optional — required for search)", open=False):
+                # YouTube Settings at the top
+                with gr.Accordion("YouTube Settings (API key, cookies)", open=False):
                     gr.Markdown(YOUTUBE_API_HELP)
                     yt_api_key = gr.Textbox(
-                        label="YouTube API Key",
+                        label="YouTube API Key (required for search)",
                         placeholder="AIza...",
                         type="password",
+                    )
+                    gr.Markdown(COOKIES_HELP)
+                    cookies_file = gr.File(
+                        label="cookies.txt (upload if YouTube blocks downloads)",
+                        file_types=[".txt"],
+                        type="filepath",
                     )
 
                 with gr.Tabs():
@@ -95,10 +115,10 @@ def create_app() -> gr.Blocks:
 
                         with gr.Row():
                             selected_video_id = gr.Textbox(
-                                label="Video ID to download (copy from results above)",
-                                placeholder="e.g. dQw4w9WgXcQ",
+                                label="YouTube video ID or URL",
+                                placeholder="e.g. dQw4w9WgXcQ or https://youtube.com/watch?v=dQw4w9WgXcQ",
                             )
-                            download_btn = gr.Button("Download Selected", variant="primary")
+                            download_btn = gr.Button("Download", variant="primary")
 
                         download_status = gr.Markdown("")
 
@@ -128,7 +148,7 @@ def create_app() -> gr.Blocks:
 
                         download_btn.click(
                             fn=handle_download_selected,
-                            inputs=[selected_video_id, yt_api_key, state],
+                            inputs=[selected_video_id, yt_api_key, cookies_file, state],
                             outputs=[state, download_status],
                         )
 
@@ -158,7 +178,7 @@ def create_app() -> gr.Blocks:
 
                         url_btn.click(
                             fn=handle_url_import,
-                            inputs=[url_input, yt_api_key, state],
+                            inputs=[url_input, yt_api_key, cookies_file, state],
                             outputs=[state, url_status],
                         )
 

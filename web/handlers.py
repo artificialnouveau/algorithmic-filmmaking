@@ -74,26 +74,44 @@ def handle_youtube_search(
 
 
 def handle_download_selected(
-    selected_video_id: str,
+    video_input: str,
     youtube_api_key: str,
+    cookies_file: Optional[str],
     state: SessionState,
 ) -> tuple[SessionState, str]:
-    """Download a selected YouTube video by video ID."""
-    if not selected_video_id or not selected_video_id.strip():
-        return state, "No video selected. Click a row in the search results first."
+    """Download a YouTube video by video ID or URL."""
+    if not video_input or not video_input.strip():
+        return state, "Please enter a YouTube video ID or URL."
 
-    video_id = selected_video_id.strip()
+    video_input = video_input.strip()
 
-    # Look up video in search results
-    video = None
+    # Accept both full URLs and bare video IDs
+    if video_input.startswith(("http://", "https://")):
+        url = video_input
+    else:
+        # Treat as video ID
+        url = f"https://www.youtube.com/watch?v={video_input}"
+
+    # Look up title from search results if available
+    title = video_input
     if hasattr(state, "search_results"):
-        video = state.search_results.get(video_id)
-
-    url = f"https://www.youtube.com/watch?v={video_id}"
-    title = video.title if video else video_id
+        # Try to extract video ID from URL for lookup
+        import re
+        vid_match = re.search(r"(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})", url)
+        vid_id = vid_match.group(1) if vid_match else video_input
+        video = state.search_results.get(vid_id)
+        if video:
+            title = video.title
 
     if youtube_api_key and youtube_api_key.strip():
         os.environ["YOUTUBE_API_KEY"] = youtube_api_key.strip()
+
+    # Handle cookies file for YouTube bot detection
+    cookies_path = None
+    if cookies_file:
+        cookies_path = Path(cookies_file)
+        if not cookies_path.exists():
+            cookies_path = None
 
     try:
         from core.downloader import VideoDownloader
@@ -102,10 +120,28 @@ def handle_download_selected(
         download_dir.mkdir(parents=True, exist_ok=True)
         downloader = VideoDownloader(download_dir=download_dir)
 
-        result = downloader.download(url)
+        # Monkey-patch the download command to include cookies if provided
+        if cookies_path:
+            original_download = downloader.download
+            def download_with_cookies(url, **kwargs):
+                # Inject cookies into yt-dlp environment
+                os.environ["YT_DLP_COOKIES"] = str(cookies_path)
+                return original_download(url, **kwargs)
+
+            # Use subprocess directly with cookies flag
+            result = _download_with_cookies(downloader, url, cookies_path)
+        else:
+            result = downloader.download(url)
 
         if not result.success:
-            return state, f"Download failed: {result.error}"
+            error_msg = result.error or "Unknown error"
+            if "Sign in to confirm" in error_msg or "bot" in error_msg:
+                error_msg += (
+                    "\n\n**YouTube is blocking this download.** "
+                    "Upload a `cookies.txt` file to bypass this. "
+                    "See the help section below for instructions."
+                )
+            return state, f"Download failed: {error_msg}"
 
         state.sources.append(
             Source(
@@ -120,6 +156,79 @@ def handle_download_selected(
 
     except RuntimeError as e:
         return state, f"Error: {e}"
+
+
+def _download_with_cookies(downloader, url: str, cookies_path: Path):
+    """Download using yt-dlp with cookies file."""
+    import subprocess
+    import re
+    import json
+    from core.downloader import DownloadResult
+    from core.binary_resolver import get_subprocess_env, get_subprocess_kwargs
+
+    # Get video info first with cookies
+    try:
+        info_cmd = [
+            downloader.ytdlp_path,
+            "--no-download",
+            "--print-json",
+            "--no-playlist",
+            "--playlist-items", "1",
+            "--cookies", str(cookies_path),
+            "--remote-components", "ejs:github",
+            "--", url,
+        ]
+        info_result = subprocess.run(
+            info_cmd, capture_output=True, text=True, timeout=30,
+            env=get_subprocess_env(), **get_subprocess_kwargs()
+        )
+        if info_result.stdout.strip():
+            data = json.loads(info_result.stdout.strip().split('\n')[0])
+            title = data.get("title", "Unknown")
+            duration = data.get("duration", 0)
+        else:
+            title = "video"
+            duration = 0
+    except Exception:
+        title = "video"
+        duration = 0
+
+    # Download with cookies
+    safe_title = re.sub(r'[<>:"/\\|?*%]', '', title)[:100] or "video"
+    output_template = str(downloader.download_dir / f"{safe_title}.%(ext)s")
+
+    cmd = [
+        downloader.ytdlp_path,
+        "--no-playlist",
+        "--playlist-items", "1",
+        "--no-exec",
+        "--max-filesize", "4G",
+        "--cookies", str(cookies_path),
+        "--remote-components", "ejs:github",
+        "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        "--merge-output-format", "mp4",
+        "-o", output_template,
+        "--", url,
+    ]
+
+    result = subprocess.run(
+        cmd, capture_output=True, text=True, timeout=3600,
+        env=get_subprocess_env(), **get_subprocess_kwargs()
+    )
+
+    if result.returncode != 0:
+        stderr = result.stderr or result.stdout or "Unknown error"
+        return DownloadResult(success=False, error=stderr[-500:])
+
+    # Find output file
+    mp4_files = list(downloader.download_dir.glob(f"{safe_title}*.mp4"))
+    if mp4_files:
+        output_file = max(mp4_files, key=lambda p: p.stat().st_mtime)
+        return DownloadResult(
+            success=True, file_path=output_file, title=title, duration=duration
+        )
+
+    return DownloadResult(success=False, error="Download completed but file not found")
 
 
 def handle_video_upload(
@@ -143,6 +252,7 @@ def handle_video_upload(
 def handle_url_import(
     url: str,
     youtube_api_key: str,
+    cookies_file: Optional[str],
     state: SessionState,
 ) -> tuple[SessionState, str]:
     """Handle URL import (YouTube, Vimeo, Internet Archive)."""
@@ -155,6 +265,13 @@ def handle_url_import(
     if youtube_api_key and youtube_api_key.strip():
         os.environ["YOUTUBE_API_KEY"] = youtube_api_key.strip()
 
+    # Handle cookies file
+    cookies_path = None
+    if cookies_file:
+        cookies_path = Path(cookies_file)
+        if not cookies_path.exists():
+            cookies_path = None
+
     try:
         from core.downloader import VideoDownloader
 
@@ -166,11 +283,20 @@ def handle_url_import(
         if not valid:
             return state, f"Invalid URL: {error}"
 
-        # Download with simple progress
-        result = downloader.download(url)
+        # Use cookies if provided
+        if cookies_path:
+            result = _download_with_cookies(downloader, url, cookies_path)
+        else:
+            result = downloader.download(url)
 
         if not result.success:
-            return state, f"Download failed: {result.error}"
+            error_msg = result.error or "Unknown error"
+            if "Sign in to confirm" in error_msg or "bot" in error_msg:
+                error_msg += (
+                    "\n\n**YouTube is blocking this download.** "
+                    "Upload a `cookies.txt` file in the YouTube API Key section."
+                )
+            return state, f"Download failed: {error_msg}"
 
         state.sources.append(
             Source(
