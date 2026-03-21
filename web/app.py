@@ -47,14 +47,8 @@ def create_app() -> gr.Blocks:
     with gr.Blocks(title="Scene Ripper") as app:
         gr.Markdown("# Scene Ripper\nAutomatic scene detection and algorithmic video remixing")
 
-        # Session state
-        state = gr.State(value=None)
-
-        # Initialize state on load
-        def init_state():
-            return SessionState()
-
-        app.load(init_state, outputs=[state])
+        # Session state — initialize directly so it's ready on first click
+        state = gr.State(value=SessionState())
 
         with gr.Tabs():
             # === COLLECT TAB ===

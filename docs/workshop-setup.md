@@ -22,13 +22,15 @@ A VS Code editor will open in your browser. Wait for the setup to finish — you
 
 ### Step 2: Install Gradio
 
-In the terminal at the bottom of the screen, type:
+In the terminal at the bottom of the screen, run these commands:
 
 ```
 pip install gradio
+curl -fsSL https://deno.land/install.sh | sh
+export PATH="$HOME/.deno/bin:$PATH"
 ```
 
-Wait for it to finish installing (about 30 seconds).
+Wait for them to finish (about 1 minute). Gradio is the web framework, and Deno is required for YouTube downloads.
 
 ### Step 3: Launch Scene Ripper
 
