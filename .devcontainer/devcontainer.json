@@ -5,7 +5,7 @@
     "ghcr.io/devcontainers/features/common-utils:2": {}
   },
   "postCreateCommand": "bash .devcontainer/setup.sh",
-  "postStartCommand": "export PATH=\"$HOME/.deno/bin:$PATH\" && nohup python -m web.app > /tmp/scene-ripper.log 2>&1 &",
+  "postAttachCommand": "export PATH=\"$HOME/.deno/bin:$PATH\" && nohup python -m web.app > /tmp/scene-ripper.log 2>&1 &",
   "forwardPorts": [7860],
   "portsAttributes": {
     "7860": {
