@@ -20,19 +20,35 @@ Click the green **Code** button, then the **Codespaces** tab, then **Create code
 
 A VS Code editor will open in your browser. Wait for the setup to finish — you'll see a message in the terminal that says **"Setup complete!"** (this takes about 2 minutes).
 
-### Step 2: Launch Scene Ripper
+### Step 2: Install Gradio
 
 In the terminal at the bottom of the screen, type:
 
 ```
+pip install gradio
+```
+
+Wait for it to finish installing (about 30 seconds).
+
+### Step 3: Launch Scene Ripper
+
+In the same terminal, type:
+
+```
 python -m web.app
+```
+
+You should see output that says:
+
+```
+Running on local URL:  http://0.0.0.0:7860
 ```
 
 A popup will appear in the bottom-right corner saying **"Port 7860 is available"**. Click **Open in Browser**.
 
 If you miss the popup, click the **Ports** tab next to the Terminal tab, find port **7860**, and click the globe icon to open it.
 
-### Step 3: You're in!
+### Step 4: You're in!
 
 Scene Ripper is now running in your browser. You have your own private instance with full processing power.
 
