@@ -107,12 +107,53 @@ Scene Ripper is now running in your browser. You have your own private instance 
 3. Go to **Sequence** → choose **Shuffle** → click **Generate Sequence**
 4. Go to **Export** → click **Export** → download your remix
 
+### Sample Videos (Internet Archive)
+
+These public domain videos work immediately — no API key or cookies needed. Go to **Collect** → **Import URL** and paste any of these:
+
+| Video | URL |
+|-------|-----|
+| Popeye - A Dream Walking (1934) | `https://archive.org/details/Popeye_A_Dream_Walking` |
+| Night of the Living Dead (1968) | `https://archive.org/details/night_of_the_living_dead` |
+| A Trip to the Moon (1902) | `https://archive.org/details/Le_Voyage_dans_la_lune` |
+| Nosferatu (1922) | `https://archive.org/details/Nosferatu_1922` |
+| Duck and Cover (1952) | `https://archive.org/details/DuckandC1951` |
+| Prelinger Archives - Ephemeral Films | `https://archive.org/details/prelinger` |
+
 ### Tips
 
 - **Sensitivity slider** (Cut tab): Lower = more scenes detected, Higher = fewer scenes
+- **Internet Archive** is the easiest source — no API key or cookies needed
 - **YouTube search** requires an API key — your instructor may provide one
 - **Short clips work best** for the workshop — try 1-5 minute videos
 - Each operation shows a status message so you know what's happening
+
+## YouTube Downloads (if blocked)
+
+YouTube sometimes blocks downloads with a **"Sign in to confirm you're not a bot"** error. To fix this, you need to export your YouTube cookies from your browser and upload them in the app.
+
+### Chrome
+
+1. Install the **[Get cookies.txt LOCALLY](https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc)** extension
+2. Go to [youtube.com](https://youtube.com) and sign in to your Google account
+3. Click the extension icon in your toolbar
+4. Click **Export** — this downloads a `cookies.txt` file
+5. In Scene Ripper, open the **YouTube Settings** accordion in the Collect tab
+6. Upload the `cookies.txt` file
+
+### Firefox
+
+1. Install the **[cookies.txt](https://addons.mozilla.org/en-US/firefox/addon/cookies-txt/)** extension by Lennon Hill
+2. Go to [youtube.com](https://youtube.com) and sign in to your Google account
+3. Click the extension icon in your toolbar
+4. Select **Current Site** and click **Export**
+5. Upload the downloaded `cookies.txt` in Scene Ripper's **YouTube Settings** section
+
+### Important notes about cookies
+
+- Cookies expire — if downloads stop working, export a fresh `cookies.txt`
+- Never share your cookies file with others (it contains your login session)
+- The cookies file is only used server-side for yt-dlp and is not stored permanently
 
 ## Troubleshooting
 
