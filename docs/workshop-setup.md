@@ -1,5 +1,20 @@
 # Scene Ripper — Workshop Setup Guide
 
+## Quick Start
+
+Once your Codespace is open, run these commands in the terminal:
+
+```bash
+pip install gradio
+curl -fsSL https://deno.land/install.sh | sh
+export PATH="$HOME/.deno/bin:$PATH"
+python -m web.app
+```
+
+Then go to the **PORTS** tab in the bottom panel, find port **7860**, right-click → set visibility to **Public**, and click the globe icon to open Scene Ripper.
+
+---
+
 ## What You Need
 
 - A **GitHub account** (free) — [sign up here](https://github.com/signup) if you don't have one
