@@ -5,8 +5,7 @@
 Once your Codespace is open, run these commands in the terminal:
 
 ```bash
-pip install gradio
-curl -fsSL https://deno.land/install.sh | sh
+pip install -r requirements-web.txt && curl -fsSL https://deno.land/install.sh | sh
 ```
 
 When Deno asks **"Edit shell configs to add deno to the PATH? (Y/n)"**, press **Y** then **Enter**.
@@ -44,15 +43,21 @@ A VS Code editor will open in your browser. Wait for the setup to finish — you
 
 ### Step 2: Install Gradio
 
-In the terminal at the bottom of the screen, run these commands:
+In the terminal at the bottom of the screen, run:
 
 ```
-pip install gradio
-curl -fsSL https://deno.land/install.sh | sh
+pip install -r requirements-web.txt && curl -fsSL https://deno.land/install.sh | sh
+```
+
+When Deno asks **"Edit shell configs to add deno to the PATH? (Y/n)"**, press **Y** then **Enter**.
+
+Then run:
+
+```
 export PATH="$HOME/.deno/bin:$PATH"
 ```
 
-Wait for them to finish (about 1 minute). Gradio is the web framework, and Deno is required for YouTube downloads.
+This installs all dependencies (may take 2-3 minutes).
 
 ### Step 3: Launch Scene Ripper
 
