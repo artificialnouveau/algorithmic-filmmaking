@@ -46,9 +46,20 @@ You should see output that says:
 Running on local URL:  http://0.0.0.0:7860
 ```
 
-A popup will appear in the bottom-right corner saying **"Port 7860 is available"**. Click **Open in Browser**.
+A popup may appear in the bottom-right corner saying **"Port 7860 is available"**. If it does, click **Open in Browser**.
 
-If you miss the popup, click the **Ports** tab next to the Terminal tab, find port **7860**, and click the globe icon to open it.
+**If you don't see the popup** (this is common), follow these steps to find the URL:
+
+1. Look at the **bottom panel** of the editor where your terminal is
+2. You'll see tabs along the top of this panel: **TERMINAL**, **PROBLEMS**, **OUTPUT**, **DEBUG CONSOLE**, **PORTS**
+3. Click the **PORTS** tab
+4. Find port **7860** in the list
+5. Hover over the **Forwarded Address** column — you'll see a URL like `https://your-codespace-name-7860.app.github.dev`
+6. Click the **globe icon** (or the URL itself) to open Scene Ripper in a new tab
+
+> **Important:** Right-click on port 7860 in the Ports tab and set **Port Visibility** to **Public**. If it's set to Private, the app buttons may not respond.
+
+**Still can't find the Ports tab?** Press `Ctrl+Shift+P` (or `Cmd+Shift+P` on Mac), type **"Ports: Focus on Ports View"**, and press Enter.
 
 ### Step 4: You're in!
 
