@@ -2,8 +2,7 @@
   "name": "Scene Ripper Web",
   "image": "mcr.microsoft.com/devcontainers/python:3.11",
   "features": {
-    "ghcr.io/devcontainers/features/common-utils:2": {},
-    "ghcr.io/anthropics/devcontainer-features/deno:1": {}
+    "ghcr.io/devcontainers/features/common-utils:2": {}
   },
   "postCreateCommand": "bash .devcontainer/setup.sh",
   "postStartCommand": "nohup python -m web.app > /tmp/scene-ripper.log 2>&1 &",
