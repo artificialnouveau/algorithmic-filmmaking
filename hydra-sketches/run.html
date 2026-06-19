@@ -52,6 +52,7 @@
 <canvas id="px"></canvas>                                 <!-- ASCII output (pixelcrash mode) -->
 <div id="ytplayer"></div>                                 <!-- embedded YouTube player (karaoke embed) -->
 <video id="lv" playsinline style="display:none"></video>  <!-- local file source (karaoke local) -->
+<video id="cam" muted playsinline style="display:none"></video> <!-- webcam (karaoke local face copies) -->
 <canvas id="maskcanvas" style="display:none"></canvas>    <!-- ellipse mask -> Hydra s3 -->
 <canvas id="ov"></canvas>                                 <!-- shared overlay: boxes/lines/labels -->
 <button id="toggle" title="Show controls">&#8801;</button>
@@ -94,7 +95,7 @@ const PARAMS = {
   // pixelcrash (ASCII over segmented people)
   pcsize: 14, pcbright: 1.1, pcback: 1, pcvary: 0.6, pccalm: 0.7, pcperson: 0.4,
   // karaoke
-  kacopies: 6, kaspread: 0.5, kasize: 60, kavol: 1.2, kadrift: 0,
+  kacopies: 6, kaspread: 0.5, kasize: 60, kavol: 1.2, kadrift: 0, kawebcam: 0,
   // embed CSS filters (only thing possible on a cross-origin iframe)
   ythue: 0, ytsat: 1, ytcon: 1, ytblur: 0, ytinv: 0,
   // shared
@@ -127,6 +128,7 @@ const KNOBS = [
   { key: 'kasize',     label: 'Lyric size', min: 20,   max: 140,  step: 2,    fmt: v => v.toFixed(0) },
   { key: 'kavol',      label: 'Vol size',   min: 0,    max: 3,    step: 0.1,  fmt: v => v.toFixed(1) },
   { key: 'kadrift',    label: 'Drift',      min: 0,    max: 1,    step: 0.05, fmt: v => v.toFixed(2) },
+  { key: 'kawebcam',   label: 'Webcam',     min: 0,    max: 1,    step: 1,    fmt: v => v.toFixed(0) },
   { key: 'ythue',      label: 'Hue',        min: 0,    max: 360,  step: 5,    fmt: v => v.toFixed(0) },
   { key: 'ytsat',      label: 'Saturate',   min: 0,    max: 3,    step: 0.05, fmt: v => v.toFixed(2) },
   { key: 'ytcon',      label: 'Contrast',   min: 0.5,  max: 3,    step: 0.05, fmt: v => v.toFixed(2) },
@@ -447,6 +449,16 @@ let kaAudioCtx = null, kaAnalyser = null, kaTimeData = null, kaVolSmooth = 0;
 let kaVid = null, kaLocalMode = false, kaMediaSrc = null, kaLocalAnalyser = null, kaLocalData = null, kaOnset = null;
 const lvEl = document.getElementById('lv');
 
+// optional webcam: detect faces in it and use those crops as the drifting copies
+const camEl = document.getElementById('cam');
+let camStarted = false, camFaces = [];
+async function ensureWebcam() {
+  if (camStarted) return;
+  const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+  camEl.srcObject = stream; await camEl.play(); camStarted = true;
+}
+function stopWebcam() { try { if (camEl.srcObject) { camEl.srcObject.getTracks().forEach(t => t.stop()); camEl.srcObject = null; } } catch (_) {} camStarted = false; camFaces = []; }
+
 // local file: same-origin <video> -> pixels + audio + exact currentTime, so
 // multiply + volume + auto-sync all work (unlike the cross-origin YT embed).
 async function startKaraokeLocal(file) {
@@ -618,20 +630,27 @@ function kaLoop() {
     const W = window.innerWidth, H = window.innerHeight;
     if (pxEl.width !== W) pxEl.width = W;
     if (pxEl.height !== H) pxEl.height = H;
-    // face detection is the heavy part - run it every 4th update only
+    // detect faces. webcam off -> always the music video. webcam on -> alternate
+    // cam/video each detection tick so both stay fresh at ~the same cost.
     kaUpd++;
-    if (kaFaceDet && kaUpd % 4 === 0) { let ts = performance.now(); if (ts <= kaLastTs) ts = kaLastTs + 1; kaLastTs = ts; try { kaFaces = kaFaceDet.detectForVideo(kaVid, ts).detections || []; } catch (_) {} }
+    const useCam = !!PARAMS.kawebcam && camStarted && camEl.videoWidth;
+    if (kaFaceDet && kaUpd % 4 === 0) {
+      let ts = performance.now(); if (ts <= kaLastTs) ts = kaLastTs + 1; kaLastTs = ts;
+      const detectCam = useCam && (((kaUpd >> 2) & 1) === 1);
+      try { const d = kaFaceDet.detectForVideo(detectCam ? camEl : kaVid, ts).detections || []; if (detectCam) camFaces = d; else kaFaces = d; } catch (_) {}
+    }
 
-    pxc.drawImage(kaVid, 0, 0, W, H);   // base video
+    pxc.drawImage(kaVid, 0, 0, W, H);   // background is always the music video
 
-    // region to multiply: first face, else a centre crop ("object" fallback),
-    // smoothed so the copies do not jitter
-    const vw = kaVid.videoWidth, vh = kaVid.videoHeight;
-    const target = kaFaces.length ? kaFaces[0].boundingBox : { originX: vw*0.35, originY: vh*0.3, width: vw*0.3, height: vh*0.4 };
-    if (!kaRegion) kaRegion = { originX: target.originX, originY: target.originY, width: target.width, height: target.height };
-    else { const k = 0.2; kaRegion.originX += (target.originX-kaRegion.originX)*k; kaRegion.originY += (target.originY-kaRegion.originY)*k; kaRegion.width += (target.width-kaRegion.width)*k; kaRegion.height += (target.height-kaRegion.height)*k; }
-    const b = kaRegion;
-    const sw = b.width / vw * W, sh = b.height / vh * H;
+    // smoothed music-video face region
+    const vW = kaVid.videoWidth, vH = kaVid.videoHeight;
+    const vidCtr = { originX: vW*0.35, originY: vH*0.3, width: vW*0.3, height: vH*0.4 };
+    const vtarget = kaFaces.length ? kaFaces[0].boundingBox : vidCtr;
+    if (!kaRegion) kaRegion = { originX: vtarget.originX, originY: vtarget.originY, width: vtarget.width, height: vtarget.height };
+    else { const k = 0.2; kaRegion.originX += (vtarget.originX-kaRegion.originX)*k; kaRegion.originY += (vtarget.originY-kaRegion.originY)*k; kaRegion.width += (vtarget.width-kaRegion.width)*k; kaRegion.height += (vtarget.height-kaRegion.height)*k; }
+    const cW = camEl.videoWidth || 1, cH = camEl.videoHeight || 1;
+    const camCtr = { originX: cW*0.35, originY: cH*0.3, width: cW*0.3, height: cH*0.4 };
+
     const copies = Math.round(PARAMS.kacopies), spread = PARAMS.kaspread, drift = PARAMS.kadrift;
     if (kaCopyState.length !== copies) {           // (re)build state when the count changes
       kaCopyState = [];
@@ -641,7 +660,15 @@ function kaLoop() {
       }
     }
     for (const cs of kaCopyState) {
-      const cw = sw * cs.sc, ch = sh * cs.sc;
+      // mixed: webcam on -> odd copies = your webcam face, even = music-video face (~half/half)
+      let srcEl, reg, sW, sH;
+      if (useCam && (cs.idx % 2 === 1)) {
+        srcEl = camEl; sW = cW; sH = cH;
+        reg = camFaces.length ? camFaces[((cs.idx - 1) >> 1) % camFaces.length].boundingBox : camCtr;
+      } else {
+        srcEl = kaVid; sW = vW; sH = vH; reg = kaRegion;
+      }
+      const cw = (reg.width / sW * W) * cs.sc, ch = (reg.height / sH * H) * cs.sc;
       if (drift > 0) {                              // DVD-style: drift each copy, bounce off edges
         cs.x += cs.vx * drift * 2.4; cs.y += cs.vy * drift * 2.4;
         if (cs.x < 0) { cs.x = 0; cs.vx = Math.abs(cs.vx); } else if (cs.x > W - cw) { cs.x = W - cw; cs.vx = -Math.abs(cs.vx); }
@@ -651,7 +678,7 @@ function kaLoop() {
         cs.x = W/2 + Math.cos(ang) * rad - cw/2; cs.y = H/2 + Math.sin(ang) * rad - ch/2;
       }
       pxc.globalAlpha = 0.9;
-      pxc.drawImage(kaVid, b.originX, b.originY, b.width, b.height, cs.x, cs.y, cw, ch);
+      pxc.drawImage(srcEl, reg.originX, reg.originY, reg.width, reg.height, cs.x, cs.y, cw, ch);
     }
     pxc.globalAlpha = 1;
 
@@ -724,18 +751,21 @@ const MODES = {
     }
   },
   'Karaoke (local)': {
-    knobs: ['kacopies', 'kaspread', 'kasize', 'kavol', 'kadrift', 'fps'],
-    hint: "Plays the downloaded file (karaoke.mp4) so EVERYTHING works: auto-sync, face-multiply, volume-reactive lyrics. Paste the song's YouTube URL + Lyrics to load words.",
+    knobs: ['kacopies', 'kaspread', 'kasize', 'kavol', 'kadrift', 'kawebcam', 'fps'],
+    hint: "Plays karaoke.mp4: auto-sync lyrics, face-multiply, volume-reactive size. Set Webcam=1 (grants camera) to multiply YOUR face over it instead of the video's.",
     async start() {
       kaVid = lvEl; kaLocalMode = true; kaOnset = null;
+      if (PARAMS.kawebcam) { try { await ensureWebcam(); } catch (e) { say('Webcam blocked: ' + e.message, true); } }
       try { await startKaraokeLocal('karaoke.mp4'); } catch (e) { say('Error: ' + e.message, true); return; }
+      const url = document.getElementById('kasong').value.trim();
+      if (url) fetchLyrics(url);   // auto-fetch lyrics for the box URL (matches the downloaded file)
       say('Loading face model...');
       kaFaceDet = await loadFaceDetector();
       kaFaces = []; kaLastTs = -1; kaUpd = 0; kaRegion = null; kaCopyState = [];
-      say('Running. Lyrics auto-sync to the file. Paste the URL + Lyrics if not loaded.');
+      say('Running. Lyrics auto-fetch from the box URL and sync to the file.');
       kaRunning = true;
       kaLoop();
-      onCleanup(() => { kaRunning = false; try { lvEl.pause(); } catch (_) {} try { kaFaceDet && kaFaceDet.close(); } catch (_) {} kaFaceDet = null; });
+      onCleanup(() => { kaRunning = false; try { lvEl.pause(); } catch (_) {} try { kaFaceDet && kaFaceDet.close(); } catch (_) {} kaFaceDet = null; stopWebcam(); });
     }
   },
   'Karaoke (capture)': {
@@ -780,7 +810,10 @@ function renderKnobs(keys) {
     const lab = document.createElement('label'); lab.textContent = k.label;
     const inp = document.createElement('input'); inp.type = 'range'; inp.min = k.min; inp.max = k.max; inp.step = k.step; inp.value = PARAMS[k.key];
     const val = document.createElement('span'); val.className = 'val'; val.textContent = k.fmt(PARAMS[k.key]);
-    inp.addEventListener('input', () => { PARAMS[k.key] = parseFloat(inp.value); val.textContent = k.fmt(PARAMS[k.key]); });
+    inp.addEventListener('input', () => {
+      PARAMS[k.key] = parseFloat(inp.value); val.textContent = k.fmt(PARAMS[k.key]);
+      if (k.key === 'kawebcam') { if (PARAMS.kawebcam) ensureWebcam().catch(e => say('Webcam blocked: ' + e.message, true)); else stopWebcam(); }
+    });
     row.append(lab, inp, val); knobsEl.appendChild(row);
     sliderRefs[k.key] = { input: inp, val, fmt: k.fmt };
   }
@@ -853,7 +886,12 @@ async function runCurrent() {
 modeSel.addEventListener('change', () => { stopCurrent(); hint.classList.remove('err'); syncControls(); });
 document.getElementById('run').addEventListener('click', runCurrent);
 document.getElementById('kafetch').addEventListener('click', () => fetchLyrics(document.getElementById('kasong').value));
-document.getElementById('kastart').addEventListener('click', () => { kaStart = performance.now(); kaStatus(kaLrc.length ? 'Started. Sync with the "Sync s" slider if off.' : 'Started, but no lyrics loaded yet.'); });
+document.getElementById('kastart').addEventListener('click', () => {
+  const m = modeSel.value;
+  if (m === 'Karaoke (local)') { try { lvEl.currentTime = 0; lvEl.play(); } catch (_) {} kaOnset = null; kaStatus('Restarted from the top.'); }
+  else if (m === 'Karaoke (embed)') { try { ytPlayer && ytPlayer.seekTo(0, true); ytPlayer && ytPlayer.playVideo(); } catch (_) {} kaStatus('Restarted from the top.'); }
+  else { kaStart = performance.now(); kaStatus(kaLrc.length ? 'Lyric clock started.' : 'Started, but no lyrics loaded yet.'); }   // capture: re-zero the clock
+});
 const toggle = document.getElementById('toggle');
 function setPanel(v) { panel.classList.toggle('hidden', !v); toggle.style.display = v ? 'none' : 'block'; }
 document.getElementById('hide').addEventListener('click', () => setPanel(false));
