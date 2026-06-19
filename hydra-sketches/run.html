@@ -95,7 +95,7 @@ const PARAMS = {
   // focal points
   blur: 26, saturate: 2.0, points: 16, box: 1.0, web: 2, smooth: 0.08, ink: 1, osc: 0.5,
   // pixelcrash (ASCII over segmented people)
-  pcsize: 14, pcbright: 1.1, pcback: 1, pcvary: 0.6, pccalm: 0.7, pcperson: 0.4,
+  pcsize: 14, pcbright: 1.1, pcback: 1, pcvary: 0.6, pccalm: 0.7, pcperson: 0.4, pcwebcam: 0,
   // karaoke
   kacopies: 6, kaspread: 0.5, kasize: 60, kavol: 1.2, kadrift: 0, kawebcam: 0,
   // embed CSS filters (only thing possible on a cross-origin iframe)
@@ -127,6 +127,7 @@ const KNOBS = [
   { key: 'pcvary',     label: 'Variation',  min: 0,    max: 1,    step: 0.05, fmt: v => v.toFixed(2) },
   { key: 'pccalm',     label: 'Calm',       min: 0,    max: 1,    step: 0.05, fmt: v => v.toFixed(2) },
   { key: 'pcperson',   label: 'Person',     min: 0.1,  max: 0.9,  step: 0.05, fmt: v => v.toFixed(2) },
+  { key: 'pcwebcam',   label: 'Webcam',     min: 0,    max: 1,    step: 1,    fmt: v => v.toFixed(0) },
   { key: 'kacopies',   label: 'Copies',     min: 0,    max: 14,   step: 1,    fmt: v => v.toFixed(0) },
   { key: 'kaspread',   label: 'Spread',     min: 0,    max: 1,    step: 0.05, fmt: v => v.toFixed(2) },
   { key: 'kasize',     label: 'Lyric size', min: 20,   max: 140,  step: 2,    fmt: v => v.toFixed(0) },
@@ -277,6 +278,10 @@ const pcTextEl = document.getElementById('pctext');
 const pcSample = document.createElement('canvas');
 const pcsx = pcSample.getContext('2d', { willReadFrequently: true });
 let pcRunning = false, pcSmooth = null, pcSeg = null, pcLastTs = -1, pcMaskArr = null, pcMW = 0, pcMH = 0, pcMaskSmooth = null, pcFrame = 0;
+// webcam overlap (optional): second mask + colour buffer for the camera person
+let camMaskArr = null, camMW = 0, camMH = 0, camData = null;
+const camSample = document.createElement('canvas');
+const csx = camSample.getContext('2d', { willReadFrequently: true });
 
 // multiclass selfie segmenter: per-pixel body-part class for ANY number of people.
 // categories: 0 background, 1 hair, 2 body-skin, 3 face-skin, 4 clothes, 5 accessories
@@ -298,13 +303,15 @@ function pcLoop() {
     const W = window.innerWidth, H = window.innerHeight;
     if (pxEl.width !== W) pxEl.width = W;
     if (pxEl.height !== H) pxEl.height = H;
-    // segment once per throttled update (FPS slider controls the overall rate)
+    const useCam = !!PARAMS.pcwebcam && camStarted && camEl.videoWidth;
+    // segment once per update. webcam on -> alternate screen/cam so both masks stay fresh.
     if (pcSeg) {
       let ts = performance.now(); if (ts <= pcLastTs) ts = pcLastTs + 1; pcLastTs = ts;
+      const segCam = useCam && (pcFrame & 1);
       try {
-        pcSeg.segmentForVideo(bgEl, ts, (res) => {
+        pcSeg.segmentForVideo(segCam ? camEl : bgEl, ts, (res) => {
           const m = res.categoryMask;
-          if (m) { pcMaskArr = m.getAsUint8Array().slice(); pcMW = m.width; pcMH = m.height; }
+          if (m) { if (segCam) { camMaskArr = m.getAsUint8Array().slice(); camMW = m.width; camMH = m.height; } else { pcMaskArr = m.getAsUint8Array().slice(); pcMW = m.width; pcMH = m.height; } }
           res.close();
         });
       } catch (_) {}
@@ -315,6 +322,7 @@ function pcLoop() {
     if (pcSample.height !== rows) pcSample.height = rows;
     pcsx.drawImage(bgEl, 0, 0, cols, rows);
     const data = pcsx.getImageData(0, 0, cols, rows).data;
+    if (useCam) { if (camSample.width !== cols) camSample.width = cols; if (camSample.height !== rows) camSample.height = rows; csx.drawImage(camEl, 0, 0, cols, rows); camData = csx.getImageData(0, 0, cols, rows).data; }
     const n = cols * rows;
     if (!pcSmooth || pcSmooth.length !== n) { pcSmooth = new Float32Array(n); pcSmooth.fill(128); }
     if (!pcMaskSmooth || pcMaskSmooth.length !== n) pcMaskSmooth = new Float32Array(n);
@@ -337,19 +345,25 @@ function pcLoop() {
         const idx = r * cols + c, o = idx * 4;
         const lum = data[o] * 0.299 + data[o+1] * 0.587 + data[o+2] * 0.114;
         pcSmooth[idx] += (lum - pcSmooth[idx]) * alpha;
-        // body-part category for this cell (0 = background)
+        // screen-person category for this cell (0 = background)
         let cat = 0;
         if (pcMaskArr) { const mx = Math.min(pcMW-1, ((c+0.5)/cols*pcMW) | 0), my = Math.min(pcMH-1, ((r+0.5)/rows*pcMH) | 0); cat = pcMaskArr[my*pcMW + mx]; }
-        // smooth a binary person value for a steady silhouette edge
-        pcMaskSmooth[idx] += ((cat ? 1 : 0) - pcMaskSmooth[idx]) * maskAlpha;
+        // webcam-person category for this cell (overlaps the screen video)
+        let camCat = 0;
+        if (useCam && camMaskArr) { const mx = Math.min(camMW-1, ((c+0.5)/cols*camMW) | 0), my = Math.min(camMH-1, ((r+0.5)/rows*camMH) | 0); camCat = camMaskArr[my*camMW + mx]; }
+        // a cell is "person" if EITHER the screen or the webcam person is here
+        pcMaskSmooth[idx] += (((cat || camCat) ? 1 : 0) - pcMaskSmooth[idx]) * maskAlpha;
         if (pcMaskSmooth[idx] < thresh) continue;      // background -> clean video
-        const r0 = data[o], g0 = data[o+1], b0 = data[o+2];
+        // webcam wins where present (its body overlaps the screen); colour from that source
+        const onCam = useCam && camCat && camData;
+        const cat2 = onCam ? camCat : cat;
+        const r0 = onCam ? camData[o] : data[o], g0 = onCam ? camData[o+1] : data[o+1], b0 = onCam ? camData[o+2] : data[o+2];
         const x = c * cell, y = r * cell;
         let ch;
         if (useText) {                                 // custom text spelled across everyone
           ch = text[ci % text.length]; ci++;
         } else {                                        // default: spell the body-part word per region
-          const pi = (cat >= 0 && cat < PCPARTS.length) ? cat : 0;
+          const pi = (cat2 >= 0 && cat2 < PCPARTS.length) ? cat2 : 0;
           const word = PCPARTS[pi];
           ch = word[partCount[pi] % word.length]; partCount[pi]++;
         }
@@ -358,6 +372,7 @@ function pcLoop() {
         pxc.fillText(ch, x, y);
       }
     }
+    pcFrame++;
   }
   requestAnimationFrame(pcLoop);
 }
@@ -738,17 +753,18 @@ const MODES = {
     }
   },
   'PixelCrash glitch': {
-    knobs: ['pcsize', 'pcback', 'pccalm', 'pcperson', 'fps'],
-    hint: "People are spelled out in text; by default each region names its body part (face/hair/skin/cloth). Type your own text above to override. Background stays clean.",
+    knobs: ['pcsize', 'pcback', 'pccalm', 'pcperson', 'pcwebcam', 'fps'],
+    hint: "People are spelled out in text (body-part labels, or your own text above). Webcam=1 overlays YOUR segmented body on top of the screen video. Background stays clean.",
     async start() {
       await startStreamCapture();
+      if (PARAMS.pcwebcam) { try { await ensureWebcam(); } catch (e) { say('Webcam blocked: ' + e.message, true); } }
       say('Loading person model...');
       pcSeg = await loadPersonSegmenter();
-      pcLastTs = -1; pcSmooth = null; pcMaskArr = null; pcMaskSmooth = null;
+      pcLastTs = -1; pcSmooth = null; pcMaskArr = null; pcMaskSmooth = null; camMaskArr = null;
       say('Running. People are ASCII; the background is clean.');
       pcRunning = true;
       pcLoop();
-      onCleanup(() => { pcRunning = false; try { pcSeg && pcSeg.close(); } catch (_) {} pcSeg = null; stopStream(bgEl); });
+      onCleanup(() => { pcRunning = false; try { pcSeg && pcSeg.close(); } catch (_) {} pcSeg = null; stopStream(bgEl); stopWebcam(); });
     }
   },
   'Karaoke (embed)': {
@@ -831,7 +847,7 @@ function renderKnobs(keys) {
     const val = document.createElement('span'); val.className = 'val'; val.textContent = k.fmt(PARAMS[k.key]);
     inp.addEventListener('input', () => {
       PARAMS[k.key] = parseFloat(inp.value); val.textContent = k.fmt(PARAMS[k.key]);
-      if (k.key === 'kawebcam') { if (PARAMS.kawebcam) ensureWebcam().catch(e => say('Webcam blocked: ' + e.message, true)); else stopWebcam(); }
+      if (k.key === 'kawebcam' || k.key === 'pcwebcam') { if (PARAMS[k.key]) ensureWebcam().catch(e => say('Webcam blocked: ' + e.message, true)); else stopWebcam(); }
     });
     row.append(lab, inp, val); knobsEl.appendChild(row);
     sliderRefs[k.key] = { input: inp, val, fmt: k.fmt };
