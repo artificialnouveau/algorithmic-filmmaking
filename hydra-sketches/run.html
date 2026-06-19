@@ -9,6 +9,7 @@
   #c  { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 2; }
   #bg { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: fill; z-index: 1; display: none; background: #fff; }
   #px { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 2; display: none; }
+  #ytplayer { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 1; display: none; border: 0; }
   #ov { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 5; pointer-events: none; }
   #panel {
     position: fixed; top: 12px; left: 12px; z-index: 10;
@@ -25,6 +26,10 @@
   #randrow { display: flex; align-items: center; gap: 6px; opacity: 0.9; }
   #textrow { display: none; }
   #pctext { width: 100%; box-sizing: border-box; background: #1a1a1a; color: #eee; border: 1px solid #444; border-radius: 6px; padding: 5px 7px; font-size: 12px; }
+  #karow { display: none; flex-direction: column; gap: 5px; }
+  #karow .line { display: flex; gap: 6px; }
+  #kasong { flex: 1; box-sizing: border-box; background: #1a1a1a; color: #eee; border: 1px solid #444; border-radius: 6px; padding: 5px 7px; font-size: 12px; }
+  #kastatus { opacity: 0.7; font-size: 11px; line-height: 1.3; }
   #hint { opacity: 0.75; line-height: 1.3; }
   #hint.err { color: #ff8a8a; opacity: 1; }
   #panel.hidden { opacity: 0; pointer-events: none; transition: opacity .4s; }
@@ -45,6 +50,8 @@
 <canvas id="c"></canvas>                                  <!-- Hydra output (face mode) -->
 <video  id="bg" autoplay muted playsinline></video>       <!-- capture source (focal + pixelcrash) -->
 <canvas id="px"></canvas>                                 <!-- ASCII output (pixelcrash mode) -->
+<div id="ytplayer"></div>                                 <!-- embedded YouTube player (karaoke embed) -->
+<video id="lv" playsinline style="display:none"></video>  <!-- local file source (karaoke local) -->
 <canvas id="maskcanvas" style="display:none"></canvas>    <!-- ellipse mask -> Hydra s3 -->
 <canvas id="ov"></canvas>                                 <!-- shared overlay: boxes/lines/labels -->
 <button id="toggle" title="Show controls">&#8801;</button>
@@ -57,6 +64,10 @@
   </div>
   <div id="randrow"><input type="checkbox" id="random"><label for="random">Random changes</label></div>
   <div id="textrow"><input id="pctext" type="text" value="" placeholder="custom text, or leave empty to label body parts"></div>
+  <div id="karow">
+    <div class="line"><input id="kasong" type="text" placeholder="paste YouTube URL (or artist title, or [mm:ss] LRC)"><button id="kafetch">Lyrics</button><button id="kastart">Start</button></div>
+    <span id="kastatus"></span>
+  </div>
   <div id="knobs"></div>
   <span id="hint"></span>
 </div>
@@ -82,6 +93,12 @@ const PARAMS = {
   blur: 26, saturate: 2.0, points: 16, box: 1.0, web: 2, smooth: 0.08, ink: 1, osc: 0.5,
   // pixelcrash (ASCII over segmented people)
   pcsize: 14, pcbright: 1.1, pcback: 1, pcvary: 0.6, pccalm: 0.7, pcperson: 0.4,
+  // karaoke
+  kacopies: 6, kaspread: 0.5, kasize: 60, kavol: 1.2, kadrift: 0,
+  // embed CSS filters (only thing possible on a cross-origin iframe)
+  ythue: 0, ytsat: 1, ytcon: 1, ytblur: 0, ytinv: 0,
+  // shared
+  fps: 30,
 };
 const KNOBS = [
   { key: 'facebox',    label: 'Face box',   min: 1,    max: 2.2,  step: 0.05, fmt: v => v.toFixed(2) },
@@ -105,7 +122,27 @@ const KNOBS = [
   { key: 'pcvary',     label: 'Variation',  min: 0,    max: 1,    step: 0.05, fmt: v => v.toFixed(2) },
   { key: 'pccalm',     label: 'Calm',       min: 0,    max: 1,    step: 0.05, fmt: v => v.toFixed(2) },
   { key: 'pcperson',   label: 'Person',     min: 0.1,  max: 0.9,  step: 0.05, fmt: v => v.toFixed(2) },
+  { key: 'kacopies',   label: 'Copies',     min: 0,    max: 14,   step: 1,    fmt: v => v.toFixed(0) },
+  { key: 'kaspread',   label: 'Spread',     min: 0,    max: 1,    step: 0.05, fmt: v => v.toFixed(2) },
+  { key: 'kasize',     label: 'Lyric size', min: 20,   max: 140,  step: 2,    fmt: v => v.toFixed(0) },
+  { key: 'kavol',      label: 'Vol size',   min: 0,    max: 3,    step: 0.1,  fmt: v => v.toFixed(1) },
+  { key: 'kadrift',    label: 'Drift',      min: 0,    max: 1,    step: 0.05, fmt: v => v.toFixed(2) },
+  { key: 'ythue',      label: 'Hue',        min: 0,    max: 360,  step: 5,    fmt: v => v.toFixed(0) },
+  { key: 'ytsat',      label: 'Saturate',   min: 0,    max: 3,    step: 0.05, fmt: v => v.toFixed(2) },
+  { key: 'ytcon',      label: 'Contrast',   min: 0.5,  max: 3,    step: 0.05, fmt: v => v.toFixed(2) },
+  { key: 'ytblur',     label: 'Blur',       min: 0,    max: 20,   step: 1,    fmt: v => v.toFixed(0) },
+  { key: 'ytinv',      label: 'Invert',     min: 0,    max: 1,    step: 1,    fmt: v => v.toFixed(0) },
+  { key: 'fps',        label: 'FPS',        min: 4,    max: 60,   step: 1,    fmt: v => v.toFixed(0) },
 ];
+
+// time-based update throttle shared by all three modes. Between updates each
+// canvas holds its last complete frame, so lower FPS = clean frame-stepping.
+let lastUpdate = 0;
+function dueForUpdate() {
+  const now = performance.now();
+  if (now - lastUpdate >= 1000 / Math.max(1, PARAMS.fps)) { lastUpdate = now; return true; }
+  return false;
+}
 const KNOB_BY_KEY = Object.fromEntries(KNOBS.map(k => [k.key, k]));
 
 // ---------------------------------------------------------------------------
@@ -157,7 +194,8 @@ async function startFaceDetection() {
   let rafId = 0, lastTs = -1, running = true;
   function loop() {
     if (!running) return;
-    if (video.readyState >= 2 && video.videoWidth) {
+    if (hydra) hydra.synth.fps = PARAMS.fps >= 60 ? null : PARAMS.fps;   // cap Hydra's render too
+    if (dueForUpdate() && video.readyState >= 2 && video.videoWidth) {
       if (mc.width !== video.videoWidth) mc.width = video.videoWidth;
       if (mc.height !== video.videoHeight) mc.height = video.videoHeight;
       let ts = performance.now(); if (ts <= lastTs) ts = lastTs + 1; lastTs = ts;
@@ -250,13 +288,12 @@ async function loadPersonSegmenter() {
 
 function pcLoop() {
   if (!pcRunning) return;
-  const W = window.innerWidth, H = window.innerHeight;
-  if (pxEl.width !== W) pxEl.width = W;
-  if (pxEl.height !== H) pxEl.height = H;
-  if (bgEl.videoWidth) {
-    // segment only every 3rd frame (the heavy ML call). Mask persists in
-    // pcMaskArr between runs, so the video stays smooth and lag drops ~3x.
-    if (pcSeg && pcFrame % 3 === 0) {
+  if (dueForUpdate() && bgEl.videoWidth) {
+    const W = window.innerWidth, H = window.innerHeight;
+    if (pxEl.width !== W) pxEl.width = W;
+    if (pxEl.height !== H) pxEl.height = H;
+    // segment once per throttled update (FPS slider controls the overall rate)
+    if (pcSeg) {
       let ts = performance.now(); if (ts <= pcLastTs) ts = pcLastTs + 1; pcLastTs = ts;
       try {
         pcSeg.segmentForVideo(bgEl, ts, (res) => {
@@ -316,7 +353,6 @@ function pcLoop() {
       }
     }
   }
-  pcFrame++;
   requestAnimationFrame(pcLoop);
 }
 
@@ -352,6 +388,7 @@ function assignTargets(targets) {
 }
 function focalLoop() {
   if (!focalRunning) return;
+  if (dueForUpdate()) {
   bgEl.style.filter = `blur(${PARAMS.blur}px) saturate(${PARAMS.saturate}) contrast(1.35)`;
   cEl.style.opacity = PARAMS.osc;   // live osc-layer blend amount
   if (ov.width !== window.innerWidth) ov.width = window.innerWidth;
@@ -369,6 +406,7 @@ function focalLoop() {
     drawFocalOverlay();
   }
   focalFrame++;
+  }
   requestAnimationFrame(focalLoop);
 }
 function drawFocalOverlay() {
@@ -401,11 +439,249 @@ function drawFocalOverlay() {
 }
 
 // ---------------------------------------------------------------------------
+// KARAOKE MODE: tab-captured music video + lrclib synced lyrics that grow with
+// the singing volume, and the face (or a fallback object) multiplied across.
+// ---------------------------------------------------------------------------
+let kaRunning = false, kaLrc = [], kaStart = 0, kaFaceDet = null, kaFaces = [], kaLastTs = -1, kaUpd = 0, kaRegion = null, kaCopyState = [];
+let kaAudioCtx = null, kaAnalyser = null, kaTimeData = null, kaVolSmooth = 0;
+let kaVid = null, kaLocalMode = false, kaMediaSrc = null, kaLocalAnalyser = null, kaLocalData = null, kaOnset = null;
+const lvEl = document.getElementById('lv');
+
+// local file: same-origin <video> -> pixels + audio + exact currentTime, so
+// multiply + volume + auto-sync all work (unlike the cross-origin YT embed).
+async function startKaraokeLocal(file) {
+  say('Loading local video: ' + file);
+  lvEl.src = file; lvEl.crossOrigin = 'anonymous'; lvEl.loop = false;
+  await new Promise((res, rej) => { lvEl.onloadeddata = () => res(); lvEl.onerror = () => rej(new Error('could not load ' + file + ' (is it in this folder?)')); });
+  // audio analyser via the media element (created once; routed to speakers + analyser)
+  if (!kaMediaSrc) {
+    kaAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    kaMediaSrc = kaAudioCtx.createMediaElementSource(lvEl);
+    kaLocalAnalyser = kaAudioCtx.createAnalyser(); kaLocalAnalyser.fftSize = 1024;
+    kaMediaSrc.connect(kaLocalAnalyser); kaLocalAnalyser.connect(kaAudioCtx.destination);
+    kaLocalData = new Uint8Array(kaLocalAnalyser.fftSize);
+  }
+  kaAnalyser = kaLocalAnalyser; kaTimeData = kaLocalData;   // use the local analyser this run
+  if (kaAudioCtx && kaAudioCtx.state === 'suspended') kaAudioCtx.resume();
+  await lvEl.play();
+}
+const kaStatusEl = document.getElementById('kastatus');
+function kaStatus(m) { kaStatusEl.textContent = m; }
+
+async function loadFaceDetector() {
+  const vision = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12');
+  const fileset = await vision.FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/wasm');
+  return vision.FaceDetector.createFromOptions(fileset, {
+    baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite', delegate: 'GPU' },
+    runningMode: 'VIDEO',
+  });
+}
+
+function parseLRC(str) {
+  const out = [], re = /\[(\d+):(\d+(?:\.\d+)?)\]/g;
+  for (const line of str.split('\n')) {
+    re.lastIndex = 0; let m; const times = [];
+    while ((m = re.exec(line))) times.push(parseInt(m[1]) * 60 + parseFloat(m[2]));
+    const text = line.replace(/\[[^\]]*\]/g, '').trim();
+    for (const t of times) out.push({ t, text });
+  }
+  return out.sort((a, b) => a.t - b.t);
+}
+
+// strip "(Official Video)", "[HD]", "ft. ...", "lyrics" etc. from a YT title
+function cleanTitle(t) {
+  return t
+    .replace(/\([^)]*\)/g, ' ').replace(/\[[^\]]*\]/g, ' ')
+    .replace(/\b(ft|feat)\.?\b.*$/i, ' ')
+    .replace(/\b(official|video|audio|music|lyrics?|hd|4k|mv|visualizer|remaster(?:ed)?)\b/gi, ' ')
+    .replace(/\s+/g, ' ').trim();
+}
+async function resolveYouTubeTitle(url) {
+  try { const r = await fetch('https://www.youtube.com/oembed?format=json&url=' + encodeURIComponent(url)); if (r.ok) return (await r.json()).title || ''; } catch (_) {}
+  try { return (await (await fetch('https://noembed.com/embed?url=' + encodeURIComponent(url))).json()).title || ''; } catch (_) {}
+  return '';
+}
+
+async function fetchLyrics(input) {
+  let q = (input || '').trim();
+  if (!q) { kaStatus('Paste a YouTube URL, "artist title", or [mm:ss] LRC.'); return; }
+  if (q.startsWith('[')) { kaLrc = parseLRC(q); kaStatus(`Parsed ${kaLrc.length} lines from LRC.`); return; }
+  if (/youtube\.com|youtu\.be/i.test(q)) {        // paste a URL -> read its title -> search
+    kaStatus('Reading video title...');
+    const title = await resolveYouTubeTitle(q);
+    if (!title) { kaStatus('Could not read the video title. Type "artist title" instead.'); return; }
+    q = cleanTitle(title);
+  }
+  kaStatus('Searching lyrics: ' + q);
+  try {
+    const arr = await (await fetch('https://lrclib.net/api/search?q=' + encodeURIComponent(q))).json();
+    const hit = arr.find(x => x.syncedLyrics);
+    if (!hit) { kaLrc = []; kaStatus('No synced lyrics for "' + q + '". Edit the query or paste LRC.'); return; }
+    kaLrc = parseLRC(hit.syncedLyrics);
+    kaStatus(`Loaded "${hit.trackName}" - ${hit.artistName} (${kaLrc.length} lines). Click Start at song start.`);
+  } catch (e) { kaStatus('Fetch failed: ' + e.message); }
+}
+
+async function startKaraokeCapture() {
+  say('Pick the YouTube tab and tick "Share tab audio"...');
+  const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+  bgEl.srcObject = stream; bgEl.muted = true;
+  await new Promise(res => { if (bgEl.readyState >= 1) res(); else bgEl.onloadedmetadata = () => res(); });
+  await bgEl.play();
+  const aTracks = stream.getAudioTracks();
+  if (aTracks.length) {
+    kaAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const node = kaAudioCtx.createMediaStreamSource(new MediaStream([aTracks[0]]));
+    kaAnalyser = kaAudioCtx.createAnalyser(); kaAnalyser.fftSize = 1024;
+    node.connect(kaAnalyser);   // analyser only, not to speakers (avoid echo)
+    kaTimeData = new Uint8Array(kaAnalyser.fftSize);
+  } else { kaAnalyser = null; kaStatus('No tab audio shared - volume reactivity off. Re-run and tick "Share tab audio".'); }
+}
+
+function kaVolume() {
+  if (!kaAnalyser) return 0.25;
+  kaAnalyser.getByteTimeDomainData(kaTimeData);
+  let sum = 0; for (let i = 0; i < kaTimeData.length; i++) { const v = (kaTimeData[i] - 128) / 128; sum += v * v; }
+  return Math.sqrt(sum / kaTimeData.length);   // ~0..1 RMS
+}
+
+function kaCurrentIndex(elapsed) {
+  let res = -1;
+  for (let i = 0; i < kaLrc.length; i++) { if (kaLrc[i].t <= elapsed) res = i; else break; }
+  return res;
+}
+
+// word-wrap a line to fit maxW at the current font
+function wrapLines(ctx, text, maxW) {
+  const words = (text || '').split(' '); const lines = []; let cur = '';
+  for (const w of words) { const test = cur ? cur + ' ' + w : w; if (ctx.measureText(test).width > maxW && cur) { lines.push(cur); cur = w; } else cur = test; }
+  if (cur) lines.push(cur); return lines;
+}
+// draw the current lyric line (wrapped, auto-shrunk to fit) + faint next line
+function drawKaraokeLyrics(ctx, W, H, idx, baseSize) {
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const maxW = W * 0.88;
+  let size = baseSize;
+  ctx.font = `bold ${Math.round(size)}px system-ui, sans-serif`;
+  let lines = wrapLines(ctx, kaLrc[idx].text, maxW);
+  while (lines.length > 3 && size > 22) { size -= 4; ctx.font = `bold ${Math.round(size)}px system-ui, sans-serif`; lines = wrapLines(ctx, kaLrc[idx].text, maxW); }
+  const lh = size * 1.15, totalH = lines.length * lh;
+  let y = H * 0.8 - totalH / 2 + lh / 2;
+  ctx.lineWidth = Math.max(3, size * 0.09); ctx.strokeStyle = '#000'; ctx.lineJoin = 'round';
+  for (const ln of lines) { ctx.strokeText(ln, W/2, y); ctx.fillStyle = '#ffe24d'; ctx.fillText(ln, W/2, y); y += lh; }   // karaoke yellow
+  if (idx + 1 < kaLrc.length && kaLrc[idx+1].text) {
+    const ns = Math.round(baseSize * 0.5);
+    ctx.font = `${ns}px system-ui, sans-serif`; ctx.lineWidth = Math.max(2, ns * 0.09); ctx.strokeStyle = '#000';
+    let ny = H * 0.93; for (const ln of wrapLines(ctx, kaLrc[idx+1].text, maxW)) { ctx.strokeText(ln, W/2, ny); ctx.fillStyle = 'rgba(255,226,77,0.55)'; ctx.fillText(ln, W/2, ny); ny += ns * 1.15; }
+  }
+  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+}
+// ---- embed karaoke: YouTube IFrame player (auto-synced lyrics, no pixel FX) ----
+const ytEl = document.getElementById('ytplayer');
+let ytPlayer = null, ytApiPromise = null, kaEmbedRunning = false;
+function ytId(url) { const m = (url || '').match(/(?:v=|youtu\.be\/|\/embed\/|\/shorts\/)([\w-]{11})/); return m ? m[1] : ''; }
+function ensureYT() {
+  if (window.YT && window.YT.Player) return Promise.resolve();
+  if (ytApiPromise) return ytApiPromise;
+  ytApiPromise = new Promise(res => { window.onYouTubeIframeAPIReady = () => res(); const s = document.createElement('script'); s.src = 'https://www.youtube.com/iframe_api'; document.head.appendChild(s); });
+  return ytApiPromise;
+}
+function makePlayer(videoId) {
+  return new Promise(res => {
+    if (ytPlayer) { ytPlayer.loadVideoById(videoId); res(); return; }
+    ytPlayer = new YT.Player('ytplayer', {
+      width: '100%', height: '100%', videoId,
+      playerVars: { autoplay: 1, controls: 1, rel: 0, modestbranding: 1, playsinline: 1 },
+      events: { onReady: () => { try { ytPlayer.playVideo(); } catch (_) {} res(); } },
+    });
+  });
+}
+function embedLoop() {
+  if (!kaEmbedRunning) return;
+  if (dueForUpdate()) {
+    const W = window.innerWidth, H = window.innerHeight;
+    if (ov.width !== W) ov.width = W; if (ov.height !== H) ov.height = H;
+    ytEl.style.filter = `hue-rotate(${PARAMS.ythue}deg) saturate(${PARAMS.ytsat}) contrast(${PARAMS.ytcon}) blur(${PARAMS.ytblur}px) invert(${PARAMS.ytinv})`;
+    octx.clearRect(0, 0, W, H);
+    if (ytPlayer && ytPlayer.getCurrentTime && kaLrc.length) {
+      let t = 0; try { t = ytPlayer.getCurrentTime(); } catch (_) {}
+      const idx = kaCurrentIndex(t);
+      if (idx >= 0) drawKaraokeLyrics(octx, W, H, idx, PARAMS.kasize);
+    }
+  }
+  requestAnimationFrame(embedLoop);
+}
+
+function kaLoop() {
+  if (!kaRunning) return;
+  if (dueForUpdate() && kaVid && kaVid.videoWidth) {
+    const W = window.innerWidth, H = window.innerHeight;
+    if (pxEl.width !== W) pxEl.width = W;
+    if (pxEl.height !== H) pxEl.height = H;
+    // face detection is the heavy part - run it every 4th update only
+    kaUpd++;
+    if (kaFaceDet && kaUpd % 4 === 0) { let ts = performance.now(); if (ts <= kaLastTs) ts = kaLastTs + 1; kaLastTs = ts; try { kaFaces = kaFaceDet.detectForVideo(kaVid, ts).detections || []; } catch (_) {} }
+
+    pxc.drawImage(kaVid, 0, 0, W, H);   // base video
+
+    // region to multiply: first face, else a centre crop ("object" fallback),
+    // smoothed so the copies do not jitter
+    const vw = kaVid.videoWidth, vh = kaVid.videoHeight;
+    const target = kaFaces.length ? kaFaces[0].boundingBox : { originX: vw*0.35, originY: vh*0.3, width: vw*0.3, height: vh*0.4 };
+    if (!kaRegion) kaRegion = { originX: target.originX, originY: target.originY, width: target.width, height: target.height };
+    else { const k = 0.2; kaRegion.originX += (target.originX-kaRegion.originX)*k; kaRegion.originY += (target.originY-kaRegion.originY)*k; kaRegion.width += (target.width-kaRegion.width)*k; kaRegion.height += (target.height-kaRegion.height)*k; }
+    const b = kaRegion;
+    const sw = b.width / vw * W, sh = b.height / vh * H;
+    const copies = Math.round(PARAMS.kacopies), spread = PARAMS.kaspread, drift = PARAMS.kadrift;
+    if (kaCopyState.length !== copies) {           // (re)build state when the count changes
+      kaCopyState = [];
+      for (let i = 1; i <= copies; i++) {
+        const dir = i * 2.0;                        // each copy a different direction
+        kaCopyState.push({ x: W/2, y: H/2, vx: Math.cos(dir), vy: Math.sin(dir), sc: 1 - (i/(copies+2))*0.5, idx: i });
+      }
+    }
+    for (const cs of kaCopyState) {
+      const cw = sw * cs.sc, ch = sh * cs.sc;
+      if (drift > 0) {                              // DVD-style: drift each copy, bounce off edges
+        cs.x += cs.vx * drift * 2.4; cs.y += cs.vy * drift * 2.4;
+        if (cs.x < 0) { cs.x = 0; cs.vx = Math.abs(cs.vx); } else if (cs.x > W - cw) { cs.x = W - cw; cs.vx = -Math.abs(cs.vx); }
+        if (cs.y < 0) { cs.y = 0; cs.vy = Math.abs(cs.vy); } else if (cs.y > H - ch) { cs.y = H - ch; cs.vy = -Math.abs(cs.vy); }
+      } else {                                       // drift off: static golden-angle scatter (Spread responsive)
+        const ang = cs.idx * 2.39996, rad = spread * Math.min(W, H) * 0.45 * (cs.idx / Math.max(1, copies));
+        cs.x = W/2 + Math.cos(ang) * rad - cw/2; cs.y = H/2 + Math.sin(ang) * rad - ch/2;
+      }
+      pxc.globalAlpha = 0.9;
+      pxc.drawImage(kaVid, b.originX, b.originY, b.width, b.height, cs.x, cs.y, cw, ch);
+    }
+    pxc.globalAlpha = 1;
+
+    // lyrics: local anchors the first line to the first sound (auto-cancels any
+    // leading silence/offset); capture uses the Start clock.
+    let elapsed = null;
+    if (kaLocalMode) {
+      if (kaLrc.length) {
+        if (kaOnset === null && kaVid.currentTime > 0.1 && kaVolume() > 0.05) kaOnset = kaVid.currentTime;
+        elapsed = (kaOnset !== null) ? (kaVid.currentTime - kaOnset + kaLrc[0].t) : -1;
+      }
+    } else if (kaLrc.length && kaStart) elapsed = (performance.now() - kaStart) / 1000;
+    if (elapsed != null) {
+      const idx = kaCurrentIndex(elapsed);
+      if (idx >= 0) {
+        kaVolSmooth += (kaVolume() - kaVolSmooth) * 0.15;                       // smooth so size doesn't jitter
+        const size = PARAMS.kasize * (1 + Math.min(1, kaVolSmooth * PARAMS.kavol * 2));
+        drawKaraokeLyrics(pxc, W, H, idx, size);                                // wrapped + auto-fit
+      }
+    }
+  }
+  requestAnimationFrame(kaLoop);
+}
+
+// ---------------------------------------------------------------------------
 // Modes.
 // ---------------------------------------------------------------------------
 const MODES = {
   'Kick face reveal': {
-    knobs: ['facebox', 'reveal', 'hold', 'faceglitch', 'pixelate', 'brightness', 'contrast'],
+    knobs: ['facebox', 'reveal', 'hold', 'faceglitch', 'pixelate', 'brightness', 'contrast', 'fps'],
     hint: "Heavy glitch; faces reveal as soft ellipses with thin frames + random curvy links.",
     async start() {
       await s0.initScreen();
@@ -418,7 +694,7 @@ const MODES = {
     }
   },
   'PixelCrash glitch': {
-    knobs: ['pcsize', 'pcback', 'pccalm', 'pcperson'],
+    knobs: ['pcsize', 'pcback', 'pccalm', 'pcperson', 'fps'],
     hint: "People are spelled out in text; by default each region names its body part (face/hair/skin/cloth). Type your own text above to override. Background stays clean.",
     async start() {
       await startStreamCapture();
@@ -431,8 +707,54 @@ const MODES = {
       onCleanup(() => { pcRunning = false; try { pcSeg && pcSeg.close(); } catch (_) {} pcSeg = null; stopStream(bgEl); });
     }
   },
+  'Karaoke (embed)': {
+    knobs: ['kasize', 'ythue', 'ytsat', 'ytcon', 'ytblur', 'ytinv', 'fps'],
+    hint: "Best sync. Paste the YouTube URL, click Run: video plays in-app, lyrics lock to it. Manipulation here is CSS filters only (Hue/Saturate/Contrast/Blur/Invert); pixel effects can't read an embedded video.",
+    async start() {
+      const url = document.getElementById('kasong').value.trim();
+      const id = ytId(url);
+      if (!id) { say('Paste a YouTube URL in the box, then Run.', true); return; }
+      say('Loading player...');
+      await ensureYT();
+      await makePlayer(id);
+      fetchLyrics(url);                 // resolve title -> lrclib (async)
+      kaEmbedRunning = true;
+      embedLoop();
+      onCleanup(() => { kaEmbedRunning = false; try { ytPlayer && ytPlayer.pauseVideo(); } catch (_) {} ytEl.style.filter = ''; octx.clearRect(0, 0, ov.width, ov.height); });
+    }
+  },
+  'Karaoke (local)': {
+    knobs: ['kacopies', 'kaspread', 'kasize', 'kavol', 'kadrift', 'fps'],
+    hint: "Plays the downloaded file (karaoke.mp4) so EVERYTHING works: auto-sync, face-multiply, volume-reactive lyrics. Paste the song's YouTube URL + Lyrics to load words.",
+    async start() {
+      kaVid = lvEl; kaLocalMode = true; kaOnset = null;
+      try { await startKaraokeLocal('karaoke.mp4'); } catch (e) { say('Error: ' + e.message, true); return; }
+      say('Loading face model...');
+      kaFaceDet = await loadFaceDetector();
+      kaFaces = []; kaLastTs = -1; kaUpd = 0; kaRegion = null; kaCopyState = [];
+      say('Running. Lyrics auto-sync to the file. Paste the URL + Lyrics if not loaded.');
+      kaRunning = true;
+      kaLoop();
+      onCleanup(() => { kaRunning = false; try { lvEl.pause(); } catch (_) {} try { kaFaceDet && kaFaceDet.close(); } catch (_) {} kaFaceDet = null; });
+    }
+  },
+  'Karaoke (capture)': {
+    knobs: ['kacopies', 'kaspread', 'kasize', 'kavol', 'kadrift', 'fps'],
+    hint: "Tab-capture (tick Share tab audio). Lyrics, then Start at the song start. Lyrics grow with the singing; the face (or centre object) is multiplied out. Sync is manual.",
+    async start() {
+      kaVid = bgEl; kaLocalMode = false;
+      await startKaraokeCapture();
+      say('Loading face model...');
+      kaFaceDet = await loadFaceDetector();
+      kaFaces = []; kaLastTs = -1; kaUpd = 0; kaRegion = null; kaCopyState = [];
+      say('Running. Fetch lyrics, then click Start at the song start.');
+      kaRunning = true;
+      kaLoop();
+      onCleanup(() => { kaRunning = false; try { kaFaceDet && kaFaceDet.close(); } catch (_) {} kaFaceDet = null; try { kaAudioCtx && kaAudioCtx.close(); } catch (_) {} kaAudioCtx = null; kaAnalyser = null; stopStream(bgEl); });
+    }
+  },
   'Focal points': {
-    knobs: ['blur', 'saturate', 'points', 'box', 'web', 'smooth', 'ink', 'osc'],
+    knobs: ['blur', 'saturate', 'points', 'box', 'web', 'smooth', 'ink', 'osc', 'fps'],
     hint: "Stream melts into color; labeled boxes track focal points with a dashed curvy web. Osc blends a Hydra pattern on top.",
     async start() {
       await startStreamCapture();
@@ -466,7 +788,7 @@ function renderKnobs(keys) {
 function updateSlider(key, v) { const r = sliderRefs[key]; if (r) { r.input.value = v; r.val.textContent = r.fmt(v); } }
 
 let randomOn = false;
-const RANDOM_EXCLUDE = new Set(['ink', 'points']);   // kept fixed during random changes
+const RANDOM_EXCLUDE = new Set(['ink', 'points', 'fps']);   // kept fixed during random changes
 document.getElementById('random').addEventListener('change', e => randomOn = e.target.checked);
 // every ~2.2s, nudge a random subset of the current mode's sliders to new values
 setInterval(() => {
@@ -493,22 +815,29 @@ function stopCurrent() {
   for (const fn of cleanupHooks) { try { fn(); } catch (_) {} }
   cleanupHooks = [];
   try { hush(); } catch (_) {}
+  try { if (hydra) hydra.synth.fps = null; } catch (_) {}   // uncap Hydra
   try { octx.clearRect(0, 0, ov.width, ov.height); } catch (_) {}
+  lastUpdate = 0;   // next mode updates immediately
   currentMode = null;
 }
 function setVisibility(name) {
   const focal = name === 'Focal points';
   const pc = name === 'PixelCrash glitch';
-  bgEl.style.display = (focal || pc) ? 'block' : 'none';   // capture source for focal + pixelcrash
-  bgEl.style.filter = focal ? '' : 'none';                  // only focal melts the bg; pc reads it raw
-  pxEl.style.display = pc ? 'block' : 'none';               // ASCII canvas only in pixelcrash
-  cEl.style.display = pc ? 'none' : 'block';                // Hydra canvas for face + focal(osc)
+  const kac = name === 'Karaoke (capture)';
+  const kae = name === 'Karaoke (embed)';
+  const kal = name === 'Karaoke (local)';
+  bgEl.style.display = (focal || pc || kac) ? 'block' : 'none';  // capture source
+  bgEl.style.filter = focal ? '' : 'none';                       // only focal melts the bg
+  pxEl.style.display = (pc || kac || kal) ? 'block' : 'none';    // 2D canvas: ascii / capture / local karaoke
+  ytEl.style.display = kae ? 'block' : 'none';                    // embedded player
+  cEl.style.display = (pc || kac || kae || kal) ? 'none' : 'block';
   cEl.style.mixBlendMode = focal ? 'overlay' : 'normal';
   cEl.style.opacity = focal ? PARAMS.osc : 1;
 }
 function syncControls() {
   renderKnobs(MODES[modeSel.value].knobs);
   document.getElementById('textrow').style.display = modeSel.value === 'PixelCrash glitch' ? 'block' : 'none';
+  document.getElementById('karow').style.display = modeSel.value.startsWith('Karaoke') ? 'flex' : 'none';
   if (!hint.classList.contains('err')) say(MODES[modeSel.value].hint);
 }
 
@@ -523,6 +852,8 @@ async function runCurrent() {
 
 modeSel.addEventListener('change', () => { stopCurrent(); hint.classList.remove('err'); syncControls(); });
 document.getElementById('run').addEventListener('click', runCurrent);
+document.getElementById('kafetch').addEventListener('click', () => fetchLyrics(document.getElementById('kasong').value));
+document.getElementById('kastart').addEventListener('click', () => { kaStart = performance.now(); kaStatus(kaLrc.length ? 'Started. Sync with the "Sync s" slider if off.' : 'Started, but no lyrics loaded yet.'); });
 const toggle = document.getElementById('toggle');
 function setPanel(v) { panel.classList.toggle('hidden', !v); toggle.style.display = v ? 'none' : 'block'; }
 document.getElementById('hide').addEventListener('click', () => setPanel(false));
