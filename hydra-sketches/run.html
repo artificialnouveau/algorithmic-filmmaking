@@ -66,6 +66,7 @@
   <div id="randrow"><input type="checkbox" id="random"><label for="random">Random changes</label></div>
   <div id="textrow"><input id="pctext" type="text" value="" placeholder="custom text, or leave empty to label body parts"></div>
   <div id="karow">
+    <div class="line"><select id="kalib" style="flex:1"><option value="">(downloaded songs appear here)</option></select></div>
     <div class="line"><input id="kasong" type="text" placeholder="paste YouTube URL (or artist title, or [mm:ss] LRC)"><button id="kafetch">Lyrics</button><button id="kastart">Start</button><button id="kapause">Pause</button></div>
     <div class="line"><input id="katime" type="range" min="0" max="1000" value="0" style="flex:1"><span id="katimelbl" style="opacity:0.7;font-variant-numeric:tabular-nums">0:00</span></div>
     <span id="kastatus"></span>
@@ -759,9 +760,11 @@ const MODES = {
     async start() {
       kaVid = lvEl; kaLocalMode = true; kaOnset = null;
       if (PARAMS.kawebcam) { try { await ensureWebcam(); } catch (e) { say('Webcam blocked: ' + e.message, true); } }
-      try { await startKaraokeLocal('karaoke.mp4'); } catch (e) { say('Error: ' + e.message, true); return; }
-      const url = document.getElementById('kasong').value.trim();
-      if (url) fetchLyrics(url);   // auto-fetch lyrics for the box URL (matches the downloaded file)
+      const _opt = kalib.selectedOptions && kalib.selectedOptions[0];
+      const _file = (_opt && _opt.value) ? _opt.value : 'karaoke.mp4';
+      try { await startKaraokeLocal(_file); } catch (e) { say('Error: ' + e.message, true); return; }
+      const url = (_opt && _opt.dataset.url) ? _opt.dataset.url : document.getElementById('kasong').value.trim();
+      if (url) fetchLyrics(url);   // lyrics from the library entry (or the box URL)
       say('Loading face model...');
       kaFaceDet = await loadFaceDetector();
       kaFaces = []; kaLastTs = -1; kaUpd = 0; kaRegion = null; kaCopyState = [];
@@ -874,6 +877,7 @@ function syncControls() {
   renderKnobs(MODES[modeSel.value].knobs);
   document.getElementById('textrow').style.display = modeSel.value === 'PixelCrash glitch' ? 'block' : 'none';
   document.getElementById('karow').style.display = modeSel.value.startsWith('Karaoke') ? 'flex' : 'none';
+  if (modeSel.value.startsWith('Karaoke')) loadLibrary();   // refresh downloaded-song list
   if (!hint.classList.contains('err')) say(MODES[modeSel.value].hint);
 }
 
@@ -919,6 +923,20 @@ function kaSyncTimeline(cur, dur) {
   kaTime.value = (cur / dur) * 1000;
   kaTimeLbl.textContent = fmtTime(cur) + ' / ' + fmtTime(dur);
 }
+
+// downloaded-song library (karaoke-videos.json maintained by add-song.sh)
+const kalib = document.getElementById('kalib'), kasongEl = document.getElementById('kasong');
+async function loadLibrary() {
+  try {
+    const lib = await (await fetch('karaoke-videos.json?_=' + Date.now())).json();
+    const cur = kalib.value;
+    kalib.innerHTML = '';
+    for (const e of lib) { const o = document.createElement('option'); o.value = e.file; o.dataset.url = e.url || ''; o.textContent = e.title || e.file; kalib.appendChild(o); }
+    if (lib.length) { kalib.value = cur || lib[0].file; const o = kalib.selectedOptions[0]; if (o && o.dataset.url && !kasongEl.value) kasongEl.value = o.dataset.url; }
+  } catch (_) { /* no library yet */ }
+}
+kalib.addEventListener('change', () => { const o = kalib.selectedOptions[0]; if (o && o.dataset.url) kasongEl.value = o.dataset.url; });
+loadLibrary();
 const toggle = document.getElementById('toggle');
 function setPanel(v) { panel.classList.toggle('hidden', !v); toggle.style.display = v ? 'none' : 'block'; }
 document.getElementById('hide').addEventListener('click', () => setPanel(false));
