@@ -66,7 +66,8 @@
   <div id="randrow"><input type="checkbox" id="random"><label for="random">Random changes</label></div>
   <div id="textrow"><input id="pctext" type="text" value="" placeholder="custom text, or leave empty to label body parts"></div>
   <div id="karow">
-    <div class="line"><input id="kasong" type="text" placeholder="paste YouTube URL (or artist title, or [mm:ss] LRC)"><button id="kafetch">Lyrics</button><button id="kastart">Start</button></div>
+    <div class="line"><input id="kasong" type="text" placeholder="paste YouTube URL (or artist title, or [mm:ss] LRC)"><button id="kafetch">Lyrics</button><button id="kastart">Start</button><button id="kapause">Pause</button></div>
+    <div class="line"><input id="katime" type="range" min="0" max="1000" value="0" style="flex:1"><span id="katimelbl" style="opacity:0.7;font-variant-numeric:tabular-nums">0:00</span></div>
     <span id="kastatus"></span>
   </div>
   <div id="knobs"></div>
@@ -620,6 +621,7 @@ function embedLoop() {
       const idx = kaCurrentIndex(t);
       if (idx >= 0) drawKaraokeLyrics(octx, W, H, idx, PARAMS.kasize);
     }
+    if (ytPlayer && ytPlayer.getDuration) { try { kaSyncTimeline(ytPlayer.getCurrentTime(), ytPlayer.getDuration()); } catch (_) {} }
   }
   requestAnimationFrame(embedLoop);
 }
@@ -699,6 +701,7 @@ function kaLoop() {
         drawKaraokeLyrics(pxc, W, H, idx, size);                                // wrapped + auto-fit
       }
     }
+    if (kaLocalMode) kaSyncTimeline(kaVid.currentTime, kaVid.duration);         // update scrubber
   }
   requestAnimationFrame(kaLoop);
 }
@@ -892,6 +895,30 @@ document.getElementById('kastart').addEventListener('click', () => {
   else if (m === 'Karaoke (embed)') { try { ytPlayer && ytPlayer.seekTo(0, true); ytPlayer && ytPlayer.playVideo(); } catch (_) {} kaStatus('Restarted from the top.'); }
   else { kaStart = performance.now(); kaStatus(kaLrc.length ? 'Lyric clock started.' : 'Started, but no lyrics loaded yet.'); }   // capture: re-zero the clock
 });
+
+// pause/play + scrubbable timeline (local + embed)
+const kaPauseBtn = document.getElementById('kapause'), kaTime = document.getElementById('katime'), kaTimeLbl = document.getElementById('katimelbl');
+let kaScrubbing = false;
+function fmtTime(s) { s = Math.max(0, s || 0); return Math.floor(s / 60) + ':' + Math.floor(s % 60).toString().padStart(2, '0'); }
+function kaIsLocal() { return modeSel.value === 'Karaoke (local)'; }
+function kaIsEmbed() { return modeSel.value === 'Karaoke (embed)'; }
+kaPauseBtn.addEventListener('click', () => {
+  if (kaIsLocal()) { if (lvEl.paused) { lvEl.play(); kaPauseBtn.textContent = 'Pause'; } else { lvEl.pause(); kaPauseBtn.textContent = 'Play'; } }
+  else if (kaIsEmbed() && ytPlayer) { try { if (ytPlayer.getPlayerState() === 1) { ytPlayer.pauseVideo(); kaPauseBtn.textContent = 'Play'; } else { ytPlayer.playVideo(); kaPauseBtn.textContent = 'Pause'; } } catch (_) {} }
+});
+kaTime.addEventListener('input', () => {
+  kaScrubbing = true;
+  const frac = kaTime.value / 1000;
+  if (kaIsLocal() && lvEl.duration) { lvEl.currentTime = frac * lvEl.duration; kaTimeLbl.textContent = fmtTime(lvEl.currentTime); }
+  else if (kaIsEmbed() && ytPlayer && ytPlayer.getDuration) { try { const d = ytPlayer.getDuration(); ytPlayer.seekTo(frac * d, true); kaTimeLbl.textContent = fmtTime(frac * d); } catch (_) {} }
+});
+kaTime.addEventListener('change', () => { kaScrubbing = false; });
+// keep the timeline in sync with playback (called from the karaoke loops)
+function kaSyncTimeline(cur, dur) {
+  if (kaScrubbing || !dur) return;
+  kaTime.value = (cur / dur) * 1000;
+  kaTimeLbl.textContent = fmtTime(cur) + ' / ' + fmtTime(dur);
+}
 const toggle = document.getElementById('toggle');
 function setPanel(v) { panel.classList.toggle('hidden', !v); toggle.style.display = v ? 'none' : 'block'; }
 document.getElementById('hide').addEventListener('click', () => setPanel(false));
