@@ -787,14 +787,16 @@ const MODES = {
         .pixelate(() => PARAMS.pixelate, () => PARAMS.pixelate)
         .modulate(noise(2.5), () => 1.5 * Math.sin(0.08 * time))
         .out(o1);
-      // face layer: SAME glitch family (rotate + breathing noise), lighter pixelate so the
-      // face still reads - it is distorted, not transparent. Face glitch scales the distortion.
-      const faceLayer = base().color(1.04, 0, -1.1).rotate(0.30, 0.1)
-        .modulate(noise(2.5), () => 0.4 * Math.sin(0.08 * time) * PARAMS.faceglitch + 0.04)
-        .pixelate(() => 260 - PARAMS.faceglitch * 200, () => 260 - PARAMS.faceglitch * 200);
+      // face layer: distorted (duotone + gentle warp) but FINER than the background and
+      // not rotating, so the face still reads. Face glitch scales the distortion up.
+      const faceLayer = base().color(1.04, 0, -1.1)
+        .modulate(noise(2, 0.3), () => PARAMS.faceglitch * 0.045)
+        .pixelate(() => 340 - PARAMS.faceglitch * 230, () => 340 - PARAMS.faceglitch * 230);
       await startFaceDetection();
       if (PARAMS.ocr) startOCR(() => s0.src).catch(e => say('OCR failed: ' + e.message, true));
-      grade(src(o1).layer(faceLayer.mask(src(s3)))).out(o0);
+      // crossfade face vs background with complementary masks (no dark-ring halo):
+      // face*mask + background*(1-mask) sums to full brightness at the feathered edge.
+      grade(faceLayer.mask(src(s3)).add(src(o1).mask(src(s3).invert()))).out(o0);
       render(o0);
       onCleanup(() => { stopStream(s0.src); stopOCR(); });
     }
