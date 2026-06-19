@@ -91,7 +91,7 @@ function say(m, err) { hint.textContent = m; hint.classList.toggle('err', !!err)
 // ---------------------------------------------------------------------------
 const PARAMS = {
   // face reveal
-  facebox: 1.3, reveal: 0.30, hold: 0.7, faceglitch: 0.3, pixelate: 40, brightness: 0, contrast: 1,
+  facebox: 1.3, reveal: 0.30, hold: 0.7, faceglitch: 0.3, pixelate: 40, brightness: 0, contrast: 1, facewebcam: 0, webmix: 0.5,
   // focal points
   blur: 26, saturate: 2.0, points: 16, box: 1.0, web: 2, smooth: 0.08, ink: 1, osc: 0.5,
   // pixelcrash (ASCII over segmented people)
@@ -111,6 +111,8 @@ const KNOBS = [
   { key: 'pixelate',   label: 'Pixelate',   min: 4,    max: 160,  step: 2,    fmt: v => v.toFixed(0) },
   { key: 'brightness', label: 'Brightness', min: -0.5, max: 0.5,  step: 0.01, fmt: v => v.toFixed(2) },
   { key: 'contrast',   label: 'Contrast',   min: 0.4,  max: 2.5,  step: 0.05, fmt: v => v.toFixed(2) },
+  { key: 'facewebcam', label: 'Webcam',     min: 0,    max: 1,    step: 1,    fmt: v => v.toFixed(0) },
+  { key: 'webmix',     label: 'Web mix',    min: 0,    max: 1,    step: 0.05, fmt: v => v.toFixed(2) },
   { key: 'blur',       label: 'Blur',       min: 0,    max: 80,   step: 1,    fmt: v => v.toFixed(0) },
   { key: 'saturate',   label: 'Saturate',   min: 1,    max: 4,    step: 0.05, fmt: v => v.toFixed(2) },
   { key: 'points',     label: 'Points',     min: 3,    max: 16,   step: 1,    fmt: v => v.toFixed(0) },
@@ -711,13 +713,24 @@ function kaLoop() {
 // Modes.
 // ---------------------------------------------------------------------------
 const MODES = {
-  'Kick face reveal': {
-    knobs: ['facebox', 'reveal', 'hold', 'faceglitch', 'pixelate', 'brightness', 'contrast', 'fps'],
-    hint: "Heavy glitch; faces reveal as soft ellipses with thin frames + random curvy links.",
+  'Melting': {
+    knobs: ['facebox', 'reveal', 'hold', 'faceglitch', 'pixelate', 'facewebcam', 'webmix', 'brightness', 'contrast', 'fps'],
+    hint: "Heavy glitch; faces melt as DISTORTED ellipses (same glitch as the rest, not clean). Webcam=1 (set before Run) blends your camera with the Kick stream.",
     async start() {
       await s0.initScreen();
-      src(s0).color(1.04, 0, -1.1).rotate(0.30, 0.1).pixelate(() => PARAMS.pixelate, () => PARAMS.pixelate).modulate(noise(2.5), () => 1.5 * Math.sin(0.08 * time)).out(o1);
-      const faceLayer = src(s0).color(1.04, 0, -1.1).modulate(noise(2, 0.2), () => PARAMS.faceglitch * 0.03).pixelate(() => 360 - PARAMS.faceglitch * 280, () => 360 - PARAMS.faceglitch * 280);
+      if (PARAMS.facewebcam) { try { s1.initCam(); } catch (_) {} }
+      // base = kick stream, optionally blended with the webcam
+      const base = () => PARAMS.facewebcam ? src(s0).blend(src(s1), () => PARAMS.webmix) : src(s0);
+      // heavy glitch background
+      base().color(1.04, 0, -1.1).rotate(0.30, 0.1)
+        .pixelate(() => PARAMS.pixelate, () => PARAMS.pixelate)
+        .modulate(noise(2.5), () => 1.5 * Math.sin(0.08 * time))
+        .out(o1);
+      // face layer: SAME glitch family (rotate + breathing noise), lighter pixelate so the
+      // face still reads - it is distorted, not transparent. Face glitch scales the distortion.
+      const faceLayer = base().color(1.04, 0, -1.1).rotate(0.30, 0.1)
+        .modulate(noise(2.5), () => 0.4 * Math.sin(0.08 * time) * PARAMS.faceglitch + 0.04)
+        .pixelate(() => 260 - PARAMS.faceglitch * 200, () => 260 - PARAMS.faceglitch * 200);
       await startFaceDetection();
       grade(src(o1).layer(faceLayer.mask(src(s3)))).out(o0);
       render(o0);
@@ -882,7 +895,7 @@ function syncControls() {
 }
 
 async function runCurrent() {
-  if (modeSel.value === 'Kick face reveal' && !hydra) { say('Synth not ready.', true); return; }
+  if (modeSel.value === 'Melting' && !hydra) { say('Synth not ready.', true); return; }
   stopCurrent();
   setVisibility(modeSel.value);
   currentMode = modeSel.value;
