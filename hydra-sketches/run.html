@@ -91,7 +91,7 @@ function say(m, err) { hint.textContent = m; hint.classList.toggle('err', !!err)
 // ---------------------------------------------------------------------------
 const PARAMS = {
   // face reveal
-  facebox: 1.3, reveal: 0.30, hold: 0.7, faceglitch: 0.3, pixelate: 40, brightness: 0, contrast: 1, facewebcam: 0, webmix: 0.5,
+  facebox: 1.3, reveal: 0.30, hold: 0.7, faceglitch: 0.3, pixelate: 40, brightness: 0, contrast: 1, facewebcam: 0, webmix: 0.5, ocr: 0,
   // focal points
   blur: 26, saturate: 2.0, points: 16, box: 1.0, web: 2, smooth: 0.08, ink: 1, osc: 0.5,
   // pixelcrash (ASCII over segmented people)
@@ -113,6 +113,7 @@ const KNOBS = [
   { key: 'contrast',   label: 'Contrast',   min: 0.4,  max: 2.5,  step: 0.05, fmt: v => v.toFixed(2) },
   { key: 'facewebcam', label: 'Webcam',     min: 0,    max: 1,    step: 1,    fmt: v => v.toFixed(0) },
   { key: 'webmix',     label: 'Web mix',    min: 0,    max: 1,    step: 0.05, fmt: v => v.toFixed(2) },
+  { key: 'ocr',        label: 'Text copy',  min: 0,    max: 1,    step: 1,    fmt: v => v.toFixed(0) },
   { key: 'blur',       label: 'Blur',       min: 0,    max: 80,   step: 1,    fmt: v => v.toFixed(0) },
   { key: 'saturate',   label: 'Saturate',   min: 1,    max: 4,    step: 0.05, fmt: v => v.toFixed(2) },
   { key: 'points',     label: 'Points',     min: 3,    max: 16,   step: 1,    fmt: v => v.toFixed(0) },
@@ -183,6 +184,50 @@ function waitForCaptureVideo(source, timeoutMs = 60000) {
   });
 }
 
+// ---- periodic OCR: copy text/numbers from the stream as drifting overlays ----
+let ocrWorker = null, ocrItems = [], ocrRunning = false, ocrTimer = 0;
+const ocrSample = document.createElement('canvas');
+function ensureTesseract() {
+  if (window.Tesseract) return Promise.resolve();
+  return new Promise((res, rej) => { const s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'; s.onload = res; s.onerror = () => rej(new Error('Tesseract load failed')); document.head.appendChild(s); });
+}
+async function startOCR(getVideo) {
+  say('Loading OCR (one-time ~3MB)...');
+  await ensureTesseract();
+  if (!ocrWorker) ocrWorker = await Tesseract.createWorker('eng');
+  ocrRunning = true;
+  const scan = async () => {
+    if (!ocrRunning) return;
+    const v = getVideo();
+    if (v && v.videoWidth) {
+      const sw = 640, sh = Math.max(1, Math.round(sw * v.videoHeight / v.videoWidth));
+      ocrSample.width = sw; ocrSample.height = sh;
+      ocrSample.getContext('2d').drawImage(v, 0, 0, sw, sh);
+      try {
+        const { data } = await ocrWorker.recognize(ocrSample);
+        const words = (data.words || []).filter(w => w.confidence > 60 && w.text.trim().length >= 2);
+        ocrItems = words.slice(0, 12).map(w => ({ text: w.text.trim(), x: Math.random() * window.innerWidth, y: Math.random() * window.innerHeight, vx: (Math.random()*2-1)*1.3, vy: (Math.random()*2-1)*1.3 }));
+      } catch (_) {}
+    }
+    if (ocrRunning) ocrTimer = setTimeout(scan, 2500);   // re-scan every 2.5s
+  };
+  scan();
+}
+function stopOCR() { ocrRunning = false; clearTimeout(ocrTimer); ocrItems = []; }
+// drift + draw the OCR copies on the overlay (called each frame from the face loop)
+function drawOCR(W, H) {
+  if (!ocrItems.length) return;
+  octx.font = 'bold 22px ui-monospace, Menlo, monospace'; octx.textAlign = 'left'; octx.textBaseline = 'top';
+  octx.lineWidth = 3; octx.lineJoin = 'round';
+  for (const it of ocrItems) {
+    it.x += it.vx; it.y += it.vy;
+    if (it.x < 0 || it.x > W - 60) it.vx *= -1;
+    if (it.y < 0 || it.y > H - 24) it.vy *= -1;
+    octx.strokeStyle = '#000'; octx.strokeText(it.text, it.x, it.y);
+    octx.fillStyle = '#ffe24d'; octx.fillText(it.text, it.x, it.y);
+  }
+}
+
 async function startFaceDetection() {
   say('Waiting for tab capture (pick the Kick tab)...');
   const video = await waitForCaptureVideo(s0);
@@ -233,6 +278,7 @@ async function startFaceDetection() {
       } else connections = [];
       octx.lineWidth = 1.5; octx.strokeStyle = 'rgba(255,255,255,0.85)';
       for (const b of boxes) octx.strokeRect(b.originX*sx, b.originY*sy, b.width*sx, b.height*sy);
+      drawOCR(ov.width, ov.height);   // drifting copies of any detected text/numbers
       connFrame++;
     }
     rafId = requestAnimationFrame(loop);
@@ -729,8 +775,8 @@ function kaLoop() {
 // ---------------------------------------------------------------------------
 const MODES = {
   'Melting': {
-    knobs: ['facebox', 'reveal', 'hold', 'faceglitch', 'pixelate', 'facewebcam', 'webmix', 'brightness', 'contrast', 'fps'],
-    hint: "Heavy glitch; faces melt as DISTORTED ellipses (same glitch as the rest, not clean). Webcam=1 (set before Run) blends your camera with the Kick stream.",
+    knobs: ['facebox', 'reveal', 'hold', 'faceglitch', 'pixelate', 'facewebcam', 'webmix', 'ocr', 'brightness', 'contrast', 'fps'],
+    hint: "Heavy glitch; faces melt as DISTORTED ellipses. Webcam=1 blends your camera. Text copy=1 OCRs the stream and floats copies of any text/numbers (set before Run).",
     async start() {
       await s0.initScreen();
       if (PARAMS.facewebcam) { try { s1.initCam(); } catch (_) {} }
@@ -747,9 +793,10 @@ const MODES = {
         .modulate(noise(2.5), () => 0.4 * Math.sin(0.08 * time) * PARAMS.faceglitch + 0.04)
         .pixelate(() => 260 - PARAMS.faceglitch * 200, () => 260 - PARAMS.faceglitch * 200);
       await startFaceDetection();
+      if (PARAMS.ocr) startOCR(() => s0.src).catch(e => say('OCR failed: ' + e.message, true));
       grade(src(o1).layer(faceLayer.mask(src(s3)))).out(o0);
       render(o0);
-      onCleanup(() => stopStream(s0.src));
+      onCleanup(() => { stopStream(s0.src); stopOCR(); });
     }
   },
   'PixelCrash glitch': {
