@@ -1,0 +1,535 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Kick studio - face reveal + focal points</title>
+<link rel="icon" href="data:,">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-family: system-ui, sans-serif; }
+  #c  { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 2; }
+  #bg { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: fill; z-index: 1; display: none; background: #fff; }
+  #px { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 2; display: none; }
+  #ov { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 5; pointer-events: none; }
+  #panel {
+    position: fixed; top: 12px; left: 12px; z-index: 10;
+    display: flex; flex-direction: column; gap: 8px;
+    background: rgba(0,0,0,0.55); padding: 10px 12px; border-radius: 8px;
+    color: #ddd; font-size: 13px; backdrop-filter: blur(6px); max-width: 340px;
+  }
+  #bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  #panel select, #panel button {
+    background: #1a1a1a; color: #eee; border: 1px solid #444;
+    border-radius: 6px; padding: 6px 8px; font-size: 13px; cursor: pointer;
+  }
+  #panel button:hover, #panel select:hover { border-color: #888; }
+  #randrow { display: flex; align-items: center; gap: 6px; opacity: 0.9; }
+  #textrow { display: none; }
+  #pctext { width: 100%; box-sizing: border-box; background: #1a1a1a; color: #eee; border: 1px solid #444; border-radius: 6px; padding: 5px 7px; font-size: 12px; }
+  #hint { opacity: 0.75; line-height: 1.3; }
+  #hint.err { color: #ff8a8a; opacity: 1; }
+  #panel.hidden { opacity: 0; pointer-events: none; transition: opacity .4s; }
+  #toggle {
+    position: fixed; top: 12px; left: 12px; z-index: 11;
+    width: 30px; height: 30px; border-radius: 6px; cursor: pointer;
+    background: rgba(0,0,0,0.55); color: #eee; border: 1px solid #444;
+    font-size: 16px; line-height: 1; backdrop-filter: blur(6px); display: none;
+  }
+  #knobs { display: flex; flex-direction: column; gap: 5px; }
+  .knob { display: grid; grid-template-columns: 70px 1fr 38px; gap: 8px; align-items: center; }
+  .knob label { opacity: 0.8; }
+  .knob input[type=range] { width: 100%; }
+  .knob .val { opacity: 0.7; text-align: right; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>                                  <!-- Hydra output (face mode) -->
+<video  id="bg" autoplay muted playsinline></video>       <!-- capture source (focal + pixelcrash) -->
+<canvas id="px"></canvas>                                 <!-- ASCII output (pixelcrash mode) -->
+<canvas id="maskcanvas" style="display:none"></canvas>    <!-- ellipse mask -> Hydra s3 -->
+<canvas id="ov"></canvas>                                 <!-- shared overlay: boxes/lines/labels -->
+<button id="toggle" title="Show controls">&#8801;</button>
+
+<div id="panel">
+  <div id="bar">
+    <select id="mode"></select>
+    <button id="run">Run</button>
+    <button id="hide">Hide</button>
+  </div>
+  <div id="randrow"><input type="checkbox" id="random"><label for="random">Random changes</label></div>
+  <div id="textrow"><input id="pctext" type="text" value="" placeholder="custom text, or leave empty to label body parts"></div>
+  <div id="knobs"></div>
+  <span id="hint"></span>
+</div>
+
+<script src="https://unpkg.com/hydra-synth"></script>
+
+<script>
+const hint   = document.getElementById('hint');
+const panel  = document.getElementById('panel');
+const cEl    = document.getElementById('c');
+const bgEl   = document.getElementById('bg');
+const ov     = document.getElementById('ov');
+const octx   = ov.getContext('2d');
+function say(m, err) { hint.textContent = m; hint.classList.toggle('err', !!err); }
+
+// ---------------------------------------------------------------------------
+// Params for BOTH modes (no overlapping keys). Each mode uses a subset.
+// ---------------------------------------------------------------------------
+const PARAMS = {
+  // face reveal
+  facebox: 1.3, reveal: 0.30, hold: 0.7, faceglitch: 0.3, pixelate: 40, brightness: 0, contrast: 1,
+  // focal points
+  blur: 26, saturate: 2.0, points: 16, box: 1.0, web: 2, smooth: 0.08, ink: 1, osc: 0.5,
+  // pixelcrash (ASCII over segmented people)
+  pcsize: 14, pcbright: 1.1, pcback: 1, pcvary: 0.6, pccalm: 0.7, pcperson: 0.4,
+};
+const KNOBS = [
+  { key: 'facebox',    label: 'Face box',   min: 1,    max: 2.2,  step: 0.05, fmt: v => v.toFixed(2) },
+  { key: 'reveal',     label: 'Reveal',     min: 0.05, max: 0.6,  step: 0.01, fmt: v => v.toFixed(2) },
+  { key: 'hold',       label: 'Hold',       min: 0,    max: 1,    step: 0.01, fmt: v => v.toFixed(2) },
+  { key: 'faceglitch', label: 'Face glitch',min: 0,    max: 1,    step: 0.01, fmt: v => v.toFixed(2) },
+  { key: 'pixelate',   label: 'Pixelate',   min: 4,    max: 160,  step: 2,    fmt: v => v.toFixed(0) },
+  { key: 'brightness', label: 'Brightness', min: -0.5, max: 0.5,  step: 0.01, fmt: v => v.toFixed(2) },
+  { key: 'contrast',   label: 'Contrast',   min: 0.4,  max: 2.5,  step: 0.05, fmt: v => v.toFixed(2) },
+  { key: 'blur',       label: 'Blur',       min: 0,    max: 80,   step: 1,    fmt: v => v.toFixed(0) },
+  { key: 'saturate',   label: 'Saturate',   min: 1,    max: 4,    step: 0.05, fmt: v => v.toFixed(2) },
+  { key: 'points',     label: 'Points',     min: 3,    max: 16,   step: 1,    fmt: v => v.toFixed(0) },
+  { key: 'box',        label: 'Box size',   min: 0.5,  max: 2.5,  step: 0.05, fmt: v => v.toFixed(2) },
+  { key: 'web',        label: 'Web',        min: 0,    max: 4,    step: 1,    fmt: v => v.toFixed(0) },
+  { key: 'smooth',     label: 'Drift',      min: 0.02, max: 0.4,  step: 0.01, fmt: v => v.toFixed(2) },
+  { key: 'ink',        label: 'Ink',        min: 0,    max: 1,    step: 0.05, fmt: v => v.toFixed(2) },
+  { key: 'osc',        label: 'Osc',        min: 0,    max: 1,    step: 0.05, fmt: v => v.toFixed(2) },
+  { key: 'pcsize',     label: 'Char size',  min: 6,    max: 28,   step: 1,    fmt: v => v.toFixed(0) },
+  { key: 'pcbright',   label: 'Bright',     min: 0.5,  max: 2,    step: 0.05, fmt: v => v.toFixed(2) },
+  { key: 'pcback',     label: 'Backing',    min: 0,    max: 1,    step: 0.05, fmt: v => v.toFixed(2) },
+  { key: 'pcvary',     label: 'Variation',  min: 0,    max: 1,    step: 0.05, fmt: v => v.toFixed(2) },
+  { key: 'pccalm',     label: 'Calm',       min: 0,    max: 1,    step: 0.05, fmt: v => v.toFixed(2) },
+  { key: 'pcperson',   label: 'Person',     min: 0.1,  max: 0.9,  step: 0.05, fmt: v => v.toFixed(2) },
+];
+const KNOB_BY_KEY = Object.fromEntries(KNOBS.map(k => [k.key, k]));
+
+// ---------------------------------------------------------------------------
+// Hydra (face mode).
+// ---------------------------------------------------------------------------
+let hydra = null;
+try {
+  if (typeof Hydra === 'undefined') throw new Error('hydra-synth did not load (CDN blocked?).');
+  hydra = new Hydra({ canvas: cEl, detectAudio: false, makeGlobal: true });
+  const fit = () => { try { setResolution(window.innerWidth, window.innerHeight); } catch (_) {} };
+  window.addEventListener('resize', fit); fit();
+} catch (e) { say('Init failed: ' + e.message, true); console.error(e); }
+function grade(chain) { return chain.brightness(() => PARAMS.brightness).contrast(() => PARAMS.contrast); }
+
+let cleanupHooks = [];
+function onCleanup(fn) { cleanupHooks.push(fn); }
+function stopStream(el) { try { if (el && el.srcObject) { el.srcObject.getTracks().forEach(t => t.stop()); el.srcObject = null; } } catch (_) {} }
+
+// ---------------------------------------------------------------------------
+// FACE MODE: BlazeFace -> ellipse mask (Hydra s3) + thin frames + curvy links.
+// ---------------------------------------------------------------------------
+function waitForCaptureVideo(source, timeoutMs = 60000) {
+  return new Promise((resolve, reject) => {
+    const t0 = performance.now();
+    (function check() {
+      const v = source.src;
+      if (v && v.videoWidth > 0) return resolve(v);
+      if (performance.now() - t0 > timeoutMs) return reject(new Error('Capture never started (no tab picked).'));
+      requestAnimationFrame(check);
+    })();
+  });
+}
+
+async function startFaceDetection() {
+  say('Waiting for tab capture (pick the Kick tab)...');
+  const video = await waitForCaptureVideo(s0);
+  say('Loading face model...');
+  const vision = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12');
+  const fileset = await vision.FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/wasm');
+  const detector = await vision.FaceDetector.createFromOptions(fileset, {
+    baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite', delegate: 'GPU' },
+    runningMode: 'VIDEO',
+  });
+  const mc = document.getElementById('maskcanvas'); const ctx = mc.getContext('2d');
+  s3.init({ src: mc, dynamic: true });
+  let connFrame = 0, connections = [];
+  function regen(n) { connections = []; for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) if (Math.random() < 0.55) connections.push([i, j, Math.random() * 2 - 1]); }
+
+  let rafId = 0, lastTs = -1, running = true;
+  function loop() {
+    if (!running) return;
+    if (video.readyState >= 2 && video.videoWidth) {
+      if (mc.width !== video.videoWidth) mc.width = video.videoWidth;
+      if (mc.height !== video.videoHeight) mc.height = video.videoHeight;
+      let ts = performance.now(); if (ts <= lastTs) ts = lastTs + 1; lastTs = ts;
+      let dets = []; try { dets = detector.detectForVideo(video, ts).detections || []; } catch (_) {}
+      const fade = Math.max(0.012, 0.30 * (1 - PARAMS.hold));
+      ctx.filter = 'none'; ctx.globalAlpha = 1; ctx.fillStyle = 'rgba(0,0,0,' + fade + ')'; ctx.fillRect(0, 0, mc.width, mc.height);
+      ctx.filter = 'blur(' + Math.round(mc.width * PARAMS.reveal * 0.05) + 'px)'; ctx.fillStyle = '#fff'; ctx.globalAlpha = 0.35;
+      const grow = PARAMS.facebox;
+      for (const d of dets) { const b = d.boundingBox; const cx = b.originX + b.width/2, cy = b.originY + b.height/2; const rx = (b.width*grow)/2, ry = (b.height*grow)/2*1.18; ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI*2); ctx.fill(); }
+      ctx.globalAlpha = 1; ctx.filter = 'none';
+
+      if (ov.width !== window.innerWidth) ov.width = window.innerWidth;
+      if (ov.height !== window.innerHeight) ov.height = window.innerHeight;
+      octx.clearRect(0, 0, ov.width, ov.height);
+      const sx = ov.width / mc.width, sy = ov.height / mc.height;
+      const boxes = dets.map(d => d.boundingBox).sort((a, b) => a.originX - b.originX);
+      if (boxes.length > 1) {
+        if (connFrame % 50 === 0) regen(boxes.length);
+        octx.lineWidth = 1; octx.strokeStyle = 'rgba(255,255,255,0.45)';
+        for (const [i, j, bow] of connections) {
+          if (i >= boxes.length || j >= boxes.length) continue;
+          const a = boxes[i], c = boxes[j];
+          const x1 = (a.originX + a.width) * sx, y1 = (a.originY + a.height/2) * sy;
+          const x2 = c.originX * sx, y2 = (c.originY + c.height/2) * sy;
+          const mx = (x1 + x2)/2, my = (y1 + y2)/2, dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy) || 1;
+          octx.beginPath(); octx.moveTo(x1, y1); octx.quadraticCurveTo(mx + (-dy/len)*bow*len*0.22, my + (dx/len)*bow*len*0.22, x2, y2); octx.stroke();
+        }
+      } else connections = [];
+      octx.lineWidth = 1.5; octx.strokeStyle = 'rgba(255,255,255,0.85)';
+      for (const b of boxes) octx.strokeRect(b.originX*sx, b.originY*sy, b.width*sx, b.height*sy);
+      connFrame++;
+    }
+    rafId = requestAnimationFrame(loop);
+  }
+  loop();
+  onCleanup(() => { running = false; cancelAnimationFrame(rafId); try { detector.close(); } catch (_) {} });
+}
+
+// ---------------------------------------------------------------------------
+// FOCAL MODE: melted stream + chroma focal points + dashed curvy web.
+// ---------------------------------------------------------------------------
+const GW = 96, GH = 54;
+const sc = document.createElement('canvas'); sc.width = GW; sc.height = GH;
+const sctx = sc.getContext('2d', { willReadFrequently: true });
+let focalRunning = false, focalFrame = 0, tracked = [];
+
+async function startStreamCapture() {
+  say('Pick the Kick tab in the share dialog...');
+  const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+  bgEl.srcObject = stream;
+  await new Promise(res => { if (bgEl.readyState >= 1) res(); else bgEl.onloadedmetadata = () => res(); });
+  await bgEl.play();
+  say('Running.');
+}
+
+// ---------------------------------------------------------------------------
+// PIXELCRASH MODE (ASCII, motion-gated): the captured stream is rendered as
+// ASCII characters in STILL areas; the most-moving areas stay clear video.
+// ---------------------------------------------------------------------------
+// several glyph ramps (low -> high density) so different regions read differently
+const PCRAMPS = [
+  ' .,:;irsXA253hMHGS#9B&@',
+  ' .oO0@%',
+  ' ░▒▓█',     // light/medium/dark shade blocks + full block
+  ' `^":!+*zxIY',
+  ' -=~+<>|/\\',
+];
+const PCACCENTS = ['#7CFC9A', '#79c0ff', '#ff7b72', '#d2a8ff', '#ffd166', '#5ef1e6'];
+function pcHue(r, g, b) { const mx = Math.max(r,g,b), mn = Math.min(r,g,b), d = mx - mn; if (!d) return 0; let h; if (mx === r) h = ((g-b)/d) % 6; else if (mx === g) h = (b-r)/d + 2; else h = (r-g)/d + 4; h *= 60; return h < 0 ? h + 360 : h; }
+const pxEl = document.getElementById('px');
+const pxc  = pxEl.getContext('2d');
+const pcTextEl = document.getElementById('pctext');
+const pcSample = document.createElement('canvas');
+const pcsx = pcSample.getContext('2d', { willReadFrequently: true });
+let pcRunning = false, pcSmooth = null, pcSeg = null, pcLastTs = -1, pcMaskArr = null, pcMW = 0, pcMH = 0, pcMaskSmooth = null, pcFrame = 0;
+
+// multiclass selfie segmenter: per-pixel body-part class for ANY number of people.
+// categories: 0 background, 1 hair, 2 body-skin, 3 face-skin, 4 clothes, 5 accessories
+const PCPARTS = ['body ', 'hair ', 'skin ', 'face ', 'cloth ', 'item '];
+async function loadPersonSegmenter() {
+  const vision = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12');
+  const fileset = await vision.FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/wasm');
+  return vision.ImageSegmenter.createFromOptions(fileset, {
+    baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/1/selfie_multiclass_256x256.tflite', delegate: 'GPU' },
+    runningMode: 'VIDEO',
+    outputCategoryMask: true,
+    outputConfidenceMasks: false,
+  });
+}
+
+function pcLoop() {
+  if (!pcRunning) return;
+  const W = window.innerWidth, H = window.innerHeight;
+  if (pxEl.width !== W) pxEl.width = W;
+  if (pxEl.height !== H) pxEl.height = H;
+  if (bgEl.videoWidth) {
+    // segment only every 3rd frame (the heavy ML call). Mask persists in
+    // pcMaskArr between runs, so the video stays smooth and lag drops ~3x.
+    if (pcSeg && pcFrame % 3 === 0) {
+      let ts = performance.now(); if (ts <= pcLastTs) ts = pcLastTs + 1; pcLastTs = ts;
+      try {
+        pcSeg.segmentForVideo(bgEl, ts, (res) => {
+          const m = res.categoryMask;
+          if (m) { pcMaskArr = m.getAsUint8Array().slice(); pcMW = m.width; pcMH = m.height; }
+          res.close();
+        });
+      } catch (_) {}
+    }
+    const cell = Math.max(6, Math.round(PARAMS.pcsize));
+    const cols = Math.max(1, Math.floor(W / cell)), rows = Math.max(1, Math.floor(H / cell));
+    if (pcSample.width !== cols) pcSample.width = cols;
+    if (pcSample.height !== rows) pcSample.height = rows;
+    pcsx.drawImage(bgEl, 0, 0, cols, rows);
+    const data = pcsx.getImageData(0, 0, cols, rows).data;
+    const n = cols * rows;
+    if (!pcSmooth || pcSmooth.length !== n) { pcSmooth = new Float32Array(n); pcSmooth.fill(128); }
+    if (!pcMaskSmooth || pcMaskSmooth.length !== n) pcMaskSmooth = new Float32Array(n);
+
+    // clean video shows through the transparent canvas; we only draw ASCII on people
+    pxc.clearRect(0, 0, W, H);
+    pxc.textBaseline = 'top';
+    pxc.font = cell + 'px ui-monospace, Menlo, monospace';
+    const numStyles = 1 + Math.round(PARAMS.pcvary * (PCRAMPS.length - 1));
+    const alpha = 0.6 - PARAMS.pccalm * 0.5;          // brightness smoothing (Calm)
+    const maskAlpha = 0.5 - PARAMS.pccalm * 0.42;     // mask edge smoothing (Calm) -> steadier silhouette
+    const thresh = PARAMS.pcperson;
+    const text = pcTextEl.value || '';                // custom phrase; empty = body-part labels
+    const useText = text.length > 0;
+    let ci = 0;                                        // custom-text cursor (reading order)
+    const partCount = [0, 0, 0, 0, 0, 0];              // per-body-part cursors (label mode)
+
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const idx = r * cols + c, o = idx * 4;
+        const lum = data[o] * 0.299 + data[o+1] * 0.587 + data[o+2] * 0.114;
+        pcSmooth[idx] += (lum - pcSmooth[idx]) * alpha;
+        // body-part category for this cell (0 = background)
+        let cat = 0;
+        if (pcMaskArr) { const mx = Math.min(pcMW-1, ((c+0.5)/cols*pcMW) | 0), my = Math.min(pcMH-1, ((r+0.5)/rows*pcMH) | 0); cat = pcMaskArr[my*pcMW + mx]; }
+        // smooth a binary person value for a steady silhouette edge
+        pcMaskSmooth[idx] += ((cat ? 1 : 0) - pcMaskSmooth[idx]) * maskAlpha;
+        if (pcMaskSmooth[idx] < thresh) continue;      // background -> clean video
+        const r0 = data[o], g0 = data[o+1], b0 = data[o+2];
+        const x = c * cell, y = r * cell;
+        let ch;
+        if (useText) {                                 // custom text spelled across everyone
+          ch = text[ci % text.length]; ci++;
+        } else {                                        // default: spell the body-part word per region
+          const pi = (cat >= 0 && cat < PCPARTS.length) ? cat : 0;
+          const word = PCPARTS[pi];
+          ch = word[partCount[pi] % word.length]; partCount[pi]++;
+        }
+        if (PARAMS.pcback > 0) { pxc.fillStyle = `rgba(0,0,0,${PARAMS.pcback})`; pxc.fillRect(x, y, cell, cell); }   // hide the person underneath
+        pxc.fillStyle = `rgb(${r0},${g0},${b0})`;      // glyph tinted by its on-screen colour (fades in shadow)
+        pxc.fillText(ch, x, y);
+      }
+    }
+  }
+  pcFrame++;
+  requestAnimationFrame(pcLoop);
+}
+
+function detectFocalPoints(n) {
+  sctx.drawImage(bgEl, 0, 0, GW, GH);
+  const data = sctx.getImageData(0, 0, GW, GH).data;
+  const chroma = new Float32Array(GW * GH);
+  for (let i = 0; i < GW * GH; i++) { const r = data[i*4], g = data[i*4+1], b = data[i*4+2]; const mx = Math.max(r,g,b), mn = Math.min(r,g,b); chroma[i] = (mx - mn) * (mx / 255); }
+  const ch = (x, y) => (x < 0 || y < 0 || x >= GW || y >= GH) ? 0 : chroma[y*GW + x];
+  const cand = []; for (let i = 0; i < GW*GH; i++) cand.push(i);
+  cand.sort((a, b) => chroma[b] - chroma[a]);
+  const picked = [], minDist = 7;
+  for (const i of cand) {
+    if (picked.length >= n) break;
+    const x = i % GW, y = (i / GW) | 0;
+    if (chroma[i] < 12) break;
+    if (picked.some(p => Math.abs(p.gx - x) < minDist && Math.abs(p.gy - y) < minDist)) continue;
+    const thr = chroma[i] * 0.4; let x0 = x, x1 = x, y0 = y, y1 = y;
+    while (x0 > 0 && ch(x0-1, y) > thr) x0--; while (x1 < GW-1 && ch(x1+1, y) > thr) x1++;
+    while (y0 > 0 && ch(x, y0-1) > thr) y0--; while (y1 < GH-1 && ch(x, y1+1) > thr) y1++;
+    picked.push({ gx: x, gy: y, gw: x1 - x0 + 1, gh: y1 - y0 + 1 });
+  }
+  const W = ov.width, H = ov.height;
+  return picked.map(p => ({ x: (p.gx+0.5)/GW*W, y: (p.gy+0.5)/GH*H, w: Math.max(36, p.gw/GW*W), h: Math.max(36, p.gh/GH*H) }));
+}
+function assignTargets(targets) {
+  const used = new Array(targets.length).fill(false);
+  for (const t of tracked) {
+    let best = -1, bd = Infinity;
+    for (let k = 0; k < targets.length; k++) { if (used[k]) continue; const d = (t.x-targets[k].x)**2 + (t.y-targets[k].y)**2; if (d < bd) { bd = d; best = k; } }
+    if (best >= 0) { used[best] = true; const g = targets[best]; t.tx = g.x; t.ty = g.y; t.tw = g.w; t.th = g.h; }
+  }
+}
+function focalLoop() {
+  if (!focalRunning) return;
+  bgEl.style.filter = `blur(${PARAMS.blur}px) saturate(${PARAMS.saturate}) contrast(1.35)`;
+  cEl.style.opacity = PARAMS.osc;   // live osc-layer blend amount
+  if (ov.width !== window.innerWidth) ov.width = window.innerWidth;
+  if (ov.height !== window.innerHeight) ov.height = window.innerHeight;
+  if (bgEl.videoWidth) {
+    const N = Math.round(PARAMS.points);
+    if (focalFrame % 4 === 0) {
+      const targets = detectFocalPoints(N);
+      while (tracked.length < Math.min(N, targets.length)) { const g = targets[tracked.length]; tracked.push({ x: g.x, y: g.y, w: g.w, h: g.h, tx: g.x, ty: g.y, tw: g.w, th: g.h, phx: Math.random() * 6.283, phy: Math.random() * 6.283 }); }
+      if (tracked.length > N) tracked.length = N;
+      assignTargets(targets);
+    }
+    const k = 0.12;   // box -> target smoothing is fixed; Drift now controls idle wander (see draw)
+    for (const t of tracked) { t.x += (t.tx-t.x)*k; t.y += (t.ty-t.y)*k; t.w += (t.tw-t.w)*k; t.h += (t.th-t.h)*k; }
+    drawFocalOverlay();
+  }
+  focalFrame++;
+  requestAnimationFrame(focalLoop);
+}
+function drawFocalOverlay() {
+  const W = ov.width, H = ov.height; octx.clearRect(0, 0, W, H);
+  const ink = `rgba(20,20,20,${PARAMS.ink})`, boxF = PARAMS.box;
+  // idle wander: boxes float even on a still image. Drift sets the amplitude.
+  const tt = performance.now() / 1000, amp = PARAMS.smooth * 150;
+  for (const t of tracked) { t.sx = t.x + Math.sin(tt * 0.6 + t.phx) * amp; t.sy = t.y + Math.cos(tt * 0.5 + t.phy) * amp; }
+  if (PARAMS.web > 0 && tracked.length > 1) {
+    octx.setLineDash([6, 5]); octx.lineWidth = 1.2; octx.strokeStyle = `rgba(25,25,25,${PARAMS.ink})`;
+    const drawn = new Set();
+    for (let i = 0; i < tracked.length; i++) {
+      const order = tracked.map((p, j) => ({ j, d: (p.sx-tracked[i].sx)**2 + (p.sy-tracked[i].sy)**2 })).filter(o => o.j !== i).sort((a, b) => a.d - b.d).slice(0, PARAMS.web);
+      for (const o of order) {
+        const key = i < o.j ? i+'-'+o.j : o.j+'-'+i; if (drawn.has(key)) continue; drawn.add(key);
+        const a = tracked[i], c = tracked[o.j]; const mx = (a.sx+c.sx)/2, my = (a.sy+c.sy)/2, dx = c.sx-a.sx, dy = c.sy-a.sy, len = Math.hypot(dx, dy) || 1;
+        const bow = ((i*37 + o.j*17) % 100 / 100 * 2 - 1);
+        octx.beginPath(); octx.moveTo(a.sx, a.sy); octx.quadraticCurveTo(mx + (-dy/len)*bow*len*0.18, my + (dx/len)*bow*len*0.18, c.sx, c.sy); octx.stroke();
+      }
+    }
+    octx.setLineDash([]);
+  }
+  octx.lineWidth = 1; octx.strokeStyle = ink; octx.fillStyle = ink; octx.font = '11px ui-monospace, Menlo, monospace';
+  for (const t of tracked) {
+    const w = t.w*boxF, h = t.h*boxF, x = t.sx - w/2, y = t.sy - h/2;
+    octx.strokeRect(x, y, w, h);
+    octx.beginPath(); octx.arc(t.sx, t.sy, 1.6, 0, Math.PI*2); octx.fill();
+    octx.fillText(`x:${Math.round(t.sx/W*bgEl.videoWidth)} y:${Math.round(t.sy/H*bgEl.videoHeight)}`, x + 2, y - 4);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Modes.
+// ---------------------------------------------------------------------------
+const MODES = {
+  'Kick face reveal': {
+    knobs: ['facebox', 'reveal', 'hold', 'faceglitch', 'pixelate', 'brightness', 'contrast'],
+    hint: "Heavy glitch; faces reveal as soft ellipses with thin frames + random curvy links.",
+    async start() {
+      await s0.initScreen();
+      src(s0).color(1.04, 0, -1.1).rotate(0.30, 0.1).pixelate(() => PARAMS.pixelate, () => PARAMS.pixelate).modulate(noise(2.5), () => 1.5 * Math.sin(0.08 * time)).out(o1);
+      const faceLayer = src(s0).color(1.04, 0, -1.1).modulate(noise(2, 0.2), () => PARAMS.faceglitch * 0.03).pixelate(() => 360 - PARAMS.faceglitch * 280, () => 360 - PARAMS.faceglitch * 280);
+      await startFaceDetection();
+      grade(src(o1).layer(faceLayer.mask(src(s3)))).out(o0);
+      render(o0);
+      onCleanup(() => stopStream(s0.src));
+    }
+  },
+  'PixelCrash glitch': {
+    knobs: ['pcsize', 'pcback', 'pccalm', 'pcperson'],
+    hint: "People are spelled out in text; by default each region names its body part (face/hair/skin/cloth). Type your own text above to override. Background stays clean.",
+    async start() {
+      await startStreamCapture();
+      say('Loading person model...');
+      pcSeg = await loadPersonSegmenter();
+      pcLastTs = -1; pcSmooth = null; pcMaskArr = null; pcMaskSmooth = null;
+      say('Running. People are ASCII; the background is clean.');
+      pcRunning = true;
+      pcLoop();
+      onCleanup(() => { pcRunning = false; try { pcSeg && pcSeg.close(); } catch (_) {} pcSeg = null; stopStream(bgEl); });
+    }
+  },
+  'Focal points': {
+    knobs: ['blur', 'saturate', 'points', 'box', 'web', 'smooth', 'ink', 'osc'],
+    hint: "Stream melts into color; labeled boxes track focal points with a dashed curvy web. Osc blends a Hydra pattern on top.",
+    async start() {
+      await startStreamCapture();
+      // osc pattern rendered by Hydra, blended over the melted stream (Osc slider = opacity)
+      osc(5, -0.126, 0.514).rotate(0, 0.1).pixelate(40, 40).out(o0); render(o0);
+      focalRunning = true; focalFrame = 0; tracked = [];
+      focalLoop();
+      onCleanup(() => { focalRunning = false; stopStream(bgEl); });
+    }
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Sliders (rebuilt per mode) + random changer.
+// ---------------------------------------------------------------------------
+const knobsEl = document.getElementById('knobs');
+let sliderRefs = {};
+function renderKnobs(keys) {
+  knobsEl.innerHTML = ''; sliderRefs = {};
+  for (const k of KNOBS) {
+    if (!keys.includes(k.key)) continue;
+    const row = document.createElement('div'); row.className = 'knob';
+    const lab = document.createElement('label'); lab.textContent = k.label;
+    const inp = document.createElement('input'); inp.type = 'range'; inp.min = k.min; inp.max = k.max; inp.step = k.step; inp.value = PARAMS[k.key];
+    const val = document.createElement('span'); val.className = 'val'; val.textContent = k.fmt(PARAMS[k.key]);
+    inp.addEventListener('input', () => { PARAMS[k.key] = parseFloat(inp.value); val.textContent = k.fmt(PARAMS[k.key]); });
+    row.append(lab, inp, val); knobsEl.appendChild(row);
+    sliderRefs[k.key] = { input: inp, val, fmt: k.fmt };
+  }
+}
+function updateSlider(key, v) { const r = sliderRefs[key]; if (r) { r.input.value = v; r.val.textContent = r.fmt(v); } }
+
+let randomOn = false;
+const RANDOM_EXCLUDE = new Set(['ink', 'points']);   // kept fixed during random changes
+document.getElementById('random').addEventListener('change', e => randomOn = e.target.checked);
+// every ~2.2s, nudge a random subset of the current mode's sliders to new values
+setInterval(() => {
+  if (!randomOn || !currentMode) return;
+  for (const key of MODES[currentMode].knobs) {
+    if (RANDOM_EXCLUDE.has(key)) continue;
+    if (Math.random() < 0.45) {
+      const k = KNOB_BY_KEY[key];
+      let v = k.min + Math.random() * (k.max - k.min);
+      if (k.step >= 1) v = Math.round(v);
+      PARAMS[key] = v; updateSlider(key, v);
+    }
+  }
+}, 2200);
+
+// ---------------------------------------------------------------------------
+// UI wiring.
+// ---------------------------------------------------------------------------
+const modeSel = document.getElementById('mode');
+for (const name of Object.keys(MODES)) { const o = document.createElement('option'); o.value = name; o.textContent = name; modeSel.appendChild(o); }
+
+let currentMode = null;
+function stopCurrent() {
+  for (const fn of cleanupHooks) { try { fn(); } catch (_) {} }
+  cleanupHooks = [];
+  try { hush(); } catch (_) {}
+  try { octx.clearRect(0, 0, ov.width, ov.height); } catch (_) {}
+  currentMode = null;
+}
+function setVisibility(name) {
+  const focal = name === 'Focal points';
+  const pc = name === 'PixelCrash glitch';
+  bgEl.style.display = (focal || pc) ? 'block' : 'none';   // capture source for focal + pixelcrash
+  bgEl.style.filter = focal ? '' : 'none';                  // only focal melts the bg; pc reads it raw
+  pxEl.style.display = pc ? 'block' : 'none';               // ASCII canvas only in pixelcrash
+  cEl.style.display = pc ? 'none' : 'block';                // Hydra canvas for face + focal(osc)
+  cEl.style.mixBlendMode = focal ? 'overlay' : 'normal';
+  cEl.style.opacity = focal ? PARAMS.osc : 1;
+}
+function syncControls() {
+  renderKnobs(MODES[modeSel.value].knobs);
+  document.getElementById('textrow').style.display = modeSel.value === 'PixelCrash glitch' ? 'block' : 'none';
+  if (!hint.classList.contains('err')) say(MODES[modeSel.value].hint);
+}
+
+async function runCurrent() {
+  if (modeSel.value === 'Kick face reveal' && !hydra) { say('Synth not ready.', true); return; }
+  stopCurrent();
+  setVisibility(modeSel.value);
+  currentMode = modeSel.value;
+  hint.classList.remove('err');
+  try { await MODES[currentMode].start(); } catch (e) { say('Error: ' + e.message, true); console.error(e); }
+}
+
+modeSel.addEventListener('change', () => { stopCurrent(); hint.classList.remove('err'); syncControls(); });
+document.getElementById('run').addEventListener('click', runCurrent);
+const toggle = document.getElementById('toggle');
+function setPanel(v) { panel.classList.toggle('hidden', !v); toggle.style.display = v ? 'none' : 'block'; }
+document.getElementById('hide').addEventListener('click', () => setPanel(false));
+toggle.addEventListener('click', () => setPanel(true));
+window.addEventListener('keydown', e => { if (e.key === 'Escape') setPanel(panel.classList.contains('hidden')); });
+
+syncControls();
+</script>
+</body>
+</html>

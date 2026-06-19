@@ -1,0 +1,140 @@
+============================================================================
+ CLIP FARMING: TOOLS AND HOW PEOPLE MAKE MONEY
+ Research notes, compiled June 2026
+============================================================================
+
+WHAT "CLIP FARMING" MEANS
+-------------------------
+Clipping = taking short, self-contained moments out of long-form content
+(a 3-hour Twitch stream, a podcast, a gaming VOD, a webinar) and reposting
+them as standalone short-form videos on TikTok, YouTube Shorts, Instagram
+Reels, etc.
+
+"Clip farming" is the high-volume, often automated version: running it like
+a content mill. Many accounts, many clips per day, optimized purely for the
+algorithm and for paid-per-view programs. The "farming" framing (like crop
+farming or "engagement farming") is what makes it interesting as subject
+matter - it is content production reduced to extraction + volume.
+
+Note: the term is used two ways.
+  1. Streaming/creator economy sense - the money-making practice below.
+  2. Casual sense - "farming clips" = harvesting good moments from streams.
+This document is about sense 1.
+
+
+============================================================================
+ THE TOOLS
+============================================================================
+
+1) AI AUTO-CLIPPING TOOLS (find the "viral" moment, cut, caption, format)
+   These ingest a long video and auto-produce vertical clips with captions.
+   - OpusClip (opus.pro)  - the dominant one; "virality score", auto-reframe
+     to vertical, auto-captions, one-click publish to all platforms.
+   - Submagic              - best-in-class animated / emoji / word-by-word
+     captions (the TikTok-Reels caption look).
+   - Reap                  - clipping + scheduling.
+   - VEED, Descript        - more general editors with clipping features.
+   - Clippie.ai, Vugola, Ssemble - newer entrants in the same space.
+   What they automate: scene/highlight detection, vertical reframing (face
+   tracking / active-speaker crop), auto-captioning, thumbnailing, posting.
+
+2) STREAM-SOURCING / CLIPPER PLATFORMS (get the raw footage, post, get paid)
+   - Clipt        - download raw streamer footage, clip it, post to short-form,
+     get paid on performance.
+   - Sx Bot / Clipify (Discord bots) - clipping workflows for streamer
+     communities.
+   - Whop          - marketplace where "clipping campaigns" live; no follower
+     / watch-hour minimums, which is why beginners start there.
+
+3) "CLIPPING CAMPAIGN" / PAID-PER-VIEW MARKETPLACES
+   Brands, creators, and labels post campaigns; clippers claim them, produce
+   clips, post to their own accounts, and get paid per verified view.
+   - Whop, ClipAffiliates, and similar campaign marketplaces.
+
+4) THE FACELESS-CHANNEL STACK (run it like a factory)
+   - Bulk scheduling / multi-account posting tools.
+   - AI voiceover + stock/gameplay background for fully synthetic clips.
+   - Spreadsheet/automation glue to manage many niche accounts at once.
+   The whole point: high-volume publishing across TikTok + Shorts + Reels
+   (+ Pinterest) without ever showing a face, because the platforms reward
+   volume.
+
+
+============================================================================
+ HOW THE MONEY ACTUALLY WORKS
+============================================================================
+Successful clippers STACK several income streams on the SAME clip:
+
+A) BRAND / CREATOR CLIPPING CAMPAIGNS  (the main money)
+   - Campaigns pay a CPM: roughly $1-$5 per 1,000 verified views.
+   - You join a campaign, clip the supplied content, post to your accounts,
+     get paid on the views you generate.
+
+B) PLATFORM CREATOR FUNDS  (stacks on top, lower rate)
+   - TikTok Creativity Program, YouTube Shorts monetization, Instagram
+     bonuses: roughly $0.02-$0.05 per 1,000 views.
+   - Small per view, but it pays out on the SAME clips as the campaign.
+
+C) DIRECT DEALS WITH STREAMERS / PODCASTERS
+   - A streamer or podcaster hires you to run their clips channel.
+   - Flat retainer ($200-$2,000 / month) OR revenue share on the clips.
+
+D) AFFILIATE / PRODUCT  (advanced)
+   - Drive clip traffic to affiliate links, your own products, or other
+     channels you monetize.
+
+Illustrative figure from the reporting: a teenager reportedly turned a $200
+laptop into ~$10,000 in two months by cutting Twitch streams into 60-second
+clips and posting them to Whop campaigns paying $1-$5 per 1,000 views.
+(Treat headline numbers as marketing-flavored; the MECHANISM is the real
+takeaway, not the jackpot.)
+
+
+============================================================================
+ THE PIPELINE (what a clip farm actually does, step by step)
+============================================================================
+   1. SOURCE   - pick streams/podcasts/VODs with clip-worthy moments.
+   2. HARVEST  - pull the raw footage (download or capture).
+   3. DETECT   - find the "good" 30-60s moments (AI highlight detection,
+                 or manual).
+   4. CUT      - trim to a self-contained beat.
+   5. REFRAME  - crop 16:9 -> 9:16, track the active speaker / face.
+   6. CAPTION  - burn in animated word-by-word subtitles.
+   7. PACKAGE  - hook in the first 1-2s, title, thumbnail.
+   8. DISTRIBUTE - post across many accounts/platforms on a schedule.
+   9. MONETIZE - collect on campaign CPM + platform funds + retainers.
+  10. OPTIMIZE - double down on what the algorithm rewarded; kill the rest.
+
+
+============================================================================
+ RELEVANCE TO THE ART ANGLE ("clip farming through live coding")
+============================================================================
+Steps 2-7 of that pipeline are EXACTLY what the Scene Ripper project already
+does (scene detection, shot classification, object/face detection, OCR,
+color/brightness analysis, render). The commercial clip-farm stack is a
+black box optimized for engagement; an art piece can expose or subvert it:
+  - Make the FARMING LOGIC the visible subject (live-code the selection rules
+    on stage, Depoorter-style but performative).
+  - Farm by the "wrong" criteria on purpose (every dead-air pause, every
+    blank frame, every logo) to satirize engagement optimization.
+  - Run the same auto-clip pipeline but route it to nonsense / refusal
+    instead of virality.
+
+The crowded reference points (so you know the room): Christian Marclay (The
+Clock), Natalie Bookchin (Mass Ornament), Dries Depoorter (Flemish Scrollers,
+The Follower). The under-worked seam is doing this LIVE and content-aware via
+live coding.
+
+
+============================================================================
+ SOURCES
+============================================================================
+- Get Paid for Clipping (ClipAffiliates): https://www.clipaffiliates.com/blog/get-paid-for-clipping
+- What is Clip Farming (AICut): https://www.aicut.pro/blog/what-is-clip-farming-understanding-the-trend-its-impact-and-how-to-get-started
+- How to Make Money Clipping for Streamers (Sx Bot): https://docs.sxbot.io/clipify/how-to-make-money-clipping-for-streamers
+- Best Platforms to Make Money Through Clipping in 2026 (Medium): https://medium.com/no-time/best-platforms-to-make-money-through-clipping-in-2026-e9547f424433
+- OpusClip: https://www.opus.pro/
+- Top AI Clipping Tools in 2026 (Reap): https://reap.video/blog/top-ai-clipping-tools-in-2026
+- 11 Best AI Clipping Tools in 2026 (Ssemble): https://www.ssemble.com/blog/best-ai-clipping-tools-2026
+- Best AI Tools for Faceless Video Creation 2025 (Clippie): https://clippie.ai/blog/best-ai-tools-faceless-video-creation-2025
+============================================================================

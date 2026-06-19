@@ -1,0 +1,171 @@
+============================================================================
+ HYDRA TECHNIQUES x CLIP-FARMING TECHNIQUES, AND HOW TO COMBINE THEM
+ Working notes for "clip farming through live coding", compiled June 2026
+============================================================================
+
+This file has three parts:
+  PART A - the palette of HYDRA techniques (real-time visual side)
+  PART B - the palette of CLIP-FARMING techniques (harvest/selection side)
+  PART C - combination recipes (where A meets B; uses your Scene Ripper stack)
+
+
+============================================================================
+ PART A - HYDRA TECHNIQUES
+============================================================================
+
+A1. SOURCES (what you feed in)
+  - Generated:  osc(), noise(), voronoi(), shape(), gradient() - pure code.
+  - Webcam:     s0.initCam()
+  - Video file: s0.initVideo(url)   (raw .mp4/.webm, CORS required)
+  - HLS stream: hls.js -> s0.init({src: videoEl})  (see livestream sketches)
+  - Screen/tab: s0.initScreen()     (capture ANY tab: YouTube/Twitch/OBS)
+  - Image:      s0.initImage(url)
+  - Network:    WebRTC patch-bay - pull ANOTHER browser/coder as a source
+  - Canvas/DOM: turn any website or <canvas> into a source
+
+A2. FEEDBACK (the engine of "living" imagery)
+  - src(o0)...out(o0): a buffer reads its own previous frame = trails, echo,
+    slit-scan, infinite zoom. The core of glitch/organic motion.
+  - Rule learned the hard way: a feedback loop MUST get fresh input each
+    frame (blend a little live source in) or it freezes after one build-up.
+
+A3. MODULATION (one image displaces another)
+  - .modulate(src, amount): use image B's pixels to warp image A's
+    coordinates. Cross-modulating two buffers = "glitches feeding each other".
+  - Variants: modulateScale, modulateRotate, modulateHue, modulatePixelate.
+
+A4. COMPOSITING / MIXING (combine layers)
+  - .blend(b, amt)  - average mix (soft)
+  - .add(b) / .mult(b) / .diff(b) - harsher math mixes
+  - .layer(b)       - alpha-based overlay (needs alpha; pair with .luma())
+  - .mask(shape)    - show B only inside a shape (the slit-scan window)
+  - Multiple framebuffers o0..o3 - build, then composite to a final buffer.
+
+A5. GEOMETRY / COLOR TRANSFORMS
+  - scale, scroll, rotate, repeat, kaleid, pixelate (geometry)
+  - color, saturate, contrast, brightness, invert, posterize, thresh, luma
+  - thresh + luma turn brightness into alpha -> keying / cut-out effects.
+
+A6. TIME / REACTIVITY (keeps it alive and responsive)
+  - () => time-based functions: animate any parameter with the clock.
+  - Audio reactivity: a.fft[] drives parameters from sound (beat = glitch).
+  - External control: MIDI, OSC, or your own JS variables set by other code.
+
+A7. NETWORKED / COLLABORATIVE
+  - Hydra's WebRTC streaming: send your output to others, receive theirs.
+  - flok / Estuary: many coders editing the same patch, in-room or remote.
+
+
+============================================================================
+ PART B - CLIP-FARMING TECHNIQUES
+============================================================================
+
+B1. SOURCING (where clips come from)
+  - Live streams (Twitch/YouTube Live), VODs, podcasts, broadcasts, public
+    webcams, your own captures. Choice of source = most of the legal risk.
+
+B2. HARVESTING (getting the raw footage)
+  - Download/rip (high ToS risk) vs. screen/OBS capture (softer) vs. API.
+  - Continuous (24/7 bot) vs. on-demand (grab a session).
+
+B3. SELECTION / DETECTION (what counts as a "clip") - THE INTERESTING PART
+  - Manual: a human picks the good moment.
+  - Highlight heuristics: audio spikes, chat velocity, big motion.
+  - SCENE/SHOT detection: cut points, shot-type changes (Scene Ripper:
+    PySceneDetect AdaptiveDetector).
+  - SEMANTIC detection (Scene Ripper already does all of these):
+      faces / person_count, objects (YOLO), on-screen text (OCR),
+      color/brightness, shot classification, descriptions (VLM), transcript.
+  - The selection CRITERIA are the editorial "voice" of a farm. Commercial
+    farms select for virality; an artist can select for anything.
+
+B4. CUTTING / REFRAMING / PACKAGING (making it postable)
+  - Trim to a self-contained beat (30-60s commercial; any length for art).
+  - Reframe 16:9 -> 9:16, track the active speaker/face.
+  - Burn-in animated captions; hook in first 1-2s; title/thumbnail.
+
+B5. DISTRIBUTION
+  - Multi-account, multi-platform, scheduled, high volume (the "farm").
+  - Or: single channel, gallery wall, installation, live performance.
+
+B6. MONETIZATION (for reference; the thing art can critique)
+  - Campaign CPM ($1-5 / 1k views, paid by sponsor, platform-agnostic).
+  - Platform funds ($0.02-0.05 / 1k, paid by TikTok/YouTube/Meta).
+  - Direct retainers / rev-share with streamers; affiliate.
+
+B7. OPTIMIZATION LOOP
+  - Measure what the algorithm rewarded, double down, kill the rest.
+  - This feedback loop is the conceptual cousin of Hydra's visual feedback.
+
+
+============================================================================
+ PART C - HOW TO COMBINE THEM
+============================================================================
+
+The bridge concept: Scene Ripper is the DETECTION/HARVEST brain (Part B3-B4);
+Hydra is the real-time DISPLAY/PERFORMANCE surface (Part A). Wire B's
+selection signals into A's parameters and you get content-aware live visuals.
+
+C1. SCREEN-CAPTURE THE STREAM INTO HYDRA  (simplest, do this first)
+  - Play a stream in a tab -> s0.initScreen() -> run the feedback/slit-scan
+    sketches on it. You are now "farming" a live feed visually, in real time.
+  - Pair two captures (or cam + capture) with the cross-feedback sketch so
+    two harvested streams warp each other.
+
+C2. DETECTION-DRIVEN GLITCH  (the signature move; uses Scene Ripper ML)
+  - Run a stream through Scene Ripper's analysis live (or near-live).
+  - Map detections -> Hydra parameters via shared JS variables / OSC:
+      face detected      -> spike .modulate amount (glitch on every face)
+      hard cut detected  -> flash invert() / re-seed the feedback
+      on-screen text(OCR)-> trigger a pixelate or kaleid burst
+      loud audio (fft)   -> ramp feedback so beats smear
+      red-dominant frame -> push saturate/contrast
+  - Result: the VISUAL reacts to the CONTENT, i.e. the farm's selection
+    criteria are made visible as glitches. This is the under-explored seam.
+
+C3. "WRONG CRITERIA" FARMING  (the critique)
+  - Commercial farms harvest the viral peak. You harvest the opposite:
+    every dead-air pause, blank frame, loading screen, logo, buffering wheel.
+  - Feed those anti-highlights into the Hydra feedback engine. The piece
+    becomes a farm tuned for everything the attention economy discards.
+
+C4. THE SUPERCUT FEEDBACK LOOP  (Bookchin x Marclay, but live)
+  - Scene Ripper farms many clips by ONE semantic rule (all faces / all
+    cuts / all red frames) -> feed the growing pile into Hydra as a source
+    sequence -> Hydra's visual feedback re-mixes them in real time.
+  - The two "feedback loops" rhyme: the farm's optimization loop (B7) and
+    Hydra's image feedback loop (A2) become the same gesture on screen.
+
+C5. PERFORMATIVE FARMING  (live coding as the act)
+  - On stage: live-code the SELECTION rules in front of the audience.
+  - The code editor itself is shown; the audience watches you change what
+    counts as a "clip" and the visuals re-harvest live. Depoorter's
+    autonomous bot, but turned into a transparent, improvised performance.
+
+C6. NETWORKED FARM  (multi-node)
+  - Several Hydra nodes each capture/farm a different stream; WebRTC patch-
+    bay routes them into one composite. A distributed clip farm as ensemble.
+
+C7. SELF-CONSUMING FARM  (closing the loop literally)
+  - Render Hydra's output -> screen-capture it back in as a new "stream" ->
+    farm your own farm. An infinite regress about content eating itself.
+
+
+============================================================================
+ PRACTICAL NEXT STEPS (smallest -> biggest)
+============================================================================
+  1. C1: initScreen() a stream into the existing cross-feedback sketch.
+  2. C3: pick ONE "wrong" criterion you can detect cheaply (blank/black
+     frames, or audio silence) and glitch on it. No ML needed yet.
+  3. C2: bridge ONE Scene Ripper detection (faces) -> one Hydra parameter.
+  4. Decide venue early (gallery vs. online) - it sets the legal contour
+     (see clip-farming-tools-and-money.txt and the ethics notes).
+
+
+============================================================================
+ RELATED FILES
+============================================================================
+  - hydra-sketches/livestream-feedback-sketches.js  (working Hydra code)
+  - clip-farming-tools-and-money.txt                (the commercial side)
+  - "hydra examples I like.txt"                      (saved sketch)
+============================================================================

@@ -1,0 +1,174 @@
+{
+  "name": "Hydra clip-farming next steps",
+  "description": "Runnable Hydra sketches for the PRACTICAL NEXT STEPS in hydra-and-clip-farming-techniques.txt. Each sketch's code is an array of lines; join with newlines to run in the Hydra editor (https://hydra.ojack.xyz).",
+  "license": "Derived sketches build on Flor de Fuego's slit scan, CC BY-NC-SA 4.0 (https://creativecommons.org/licenses/by-nc-sa/4.0/).",
+  "compiled": "2026-06-07",
+  "related_files": [
+    "hydra-and-clip-farming-techniques.txt",
+    "hydra-sketches/livestream-feedback-sketches.js",
+    "clip-farming-tools-and-money.txt"
+  ],
+  "how_to_use": "Open https://hydra.ojack.xyz, paste one sketch's joined code, run with Ctrl/Cmd+Shift+Enter. For initScreen() pick the browser tab playing your stream. Sketch c3b and c2 use a small block of plain JS that the Hydra editor allows.",
+  "sketches": [
+    {
+      "id": "c1-screen-capture-crossfeedback",
+      "step": 1,
+      "title": "C1 - two screen-captured streams, cross-feedback",
+      "goal": "Farm any live feed (YouTube/Twitch/webcam page) by capturing the tab and warping two captures into each other. No CORS fight, no ML.",
+      "requires": [
+        "Two browser tabs, each playing a stream you want to farm.",
+        "Run the two initScreen() lines ONE AT A TIME so the picker lets you choose a different tab for each."
+      ],
+      "code": [
+        "// C1 - cross-feedback between two SCREEN CAPTURES (simplest combo)",
+        "// Run the two init lines ONE AT A TIME; pick a different tab each time.",
+        "s0.initScreen()   // capture tab playing stream A",
+        "s1.initScreen()   // capture tab playing stream B  (or s1.initCam())",
+        "",
+        "src(s0).saturate(2).contrast(1.3)",
+        "  .blend(src(o0).scrollX(0.003), 0.85)",
+        "  .modulate(o1, 0.01)",
+        "  .out(o0)",
+        "",
+        "src(s1).saturate(2).contrast(1.3)",
+        "  .blend(src(o1).scrollY(0.003), 0.85)",
+        "  .modulate(o0, 0.01)",
+        "  .out(o1)",
+        "",
+        "src(o0).blend(o1, 0.5).out(o2)",
+        "render(o2)"
+      ],
+      "tweaks": [
+        "0.85 blend = trail length; lower toward 0.7 for livelier motion.",
+        "0.01 modulate = cross-warp intensity; raise toward 0.03 for chaos.",
+        "render(o0) or render(o1) to view a single farmed stream alone."
+      ]
+    },
+    {
+      "id": "c3a-deadair-audio-glitch",
+      "step": 2,
+      "title": "C3a - glitch the DEAD AIR (audio silence as the 'wrong' criterion)",
+      "goal": "Harvest what the attention economy discards: react to silence, not action. Uses Hydra's built-in audio reactivity, no ML.",
+      "requires": [
+        "Hydra audio (a.fft) listens to the MICROPHONE by default.",
+        "To react to a stream's sound: play it aloud near the mic, OR route the tab audio into your mic input with a virtual audio cable / loopback."
+      ],
+      "code": [
+        "// C3a - glitch on DEAD AIR using Hydra's built-in audio reactivity",
+        "// a.fft listens to the MIC by default; route or play the stream audio in.",
+        "a.setSmooth(0.9)",
+        "",
+        "s0.initScreen()",
+        "",
+        "// a.fft[0] = bass energy 0..1. When LOW (silence), modulate is HIGH,",
+        "// so the piece glitches the quiet moments instead of the loud ones.",
+        "src(s0)",
+        "  .modulate(o0, () => (1 - a.fft[0]) * 0.08)",
+        "  .blend(src(o0).scrollX(0.003), 0.85)",
+        "  .out(o0)",
+        "render(o0)"
+      ],
+      "tweaks": [
+        "Flip it: use a.fft[0] * 0.08 to glitch the LOUD moments instead.",
+        "a.setSmooth(0.9) softens the reaction; lower for twitchier response.",
+        "a.show() draws the fft bins so you can see the audio coming in."
+      ]
+    },
+    {
+      "id": "c3b-blackframe-probe-glitch",
+      "step": 2,
+      "title": "C3b - glitch on BLACK / BLANK frames (cheap JS brightness probe)",
+      "goal": "Detect cut-to-black, loading screens, buffering, dead frames with a tiny JS probe and glitch them. No ML, pure pixel brightness.",
+      "requires": [
+        "Works with initScreen()/initCam() (MediaStream pixels are safe to read).",
+        "Cross-origin initVideo() may TAINT the canvas and throw - prefer capture."
+      ],
+      "code": [
+        "// C3b - detect BLACK / BLANK frames with a tiny JS brightness probe",
+        "// No ML. Sets window.darkness (0 = bright .. 1 = fully black).",
+        "s0.initScreen()",
+        "",
+        "{",
+        "  const vid = s0.src                        // source's <video> element",
+        "  const c = document.createElement('canvas'); c.width = 32; c.height = 18",
+        "  const ctx = c.getContext('2d', { willReadFrequently: true })",
+        "  if (window._probe) clearInterval(window._probe)",
+        "  window.darkness = 0",
+        "  window._probe = setInterval(() => {",
+        "    try {",
+        "      ctx.drawImage(vid, 0, 0, c.width, c.height)",
+        "      const d = ctx.getImageData(0, 0, c.width, c.height).data",
+        "      let sum = 0",
+        "      for (let i = 0; i < d.length; i += 4) sum += (d[i] + d[i+1] + d[i+2]) / 3",
+        "      const avg = sum / (d.length / 4) / 255   // mean brightness 0..1",
+        "      window.darkness = 1 - avg                // 1 = fully black frame",
+        "    } catch (e) {}",
+        "  }, 100)",
+        "}",
+        "",
+        "// glitch HARD when the frame goes black/blank (cut, loading, buffering)",
+        "src(s0)",
+        "  .modulate(noise(3), () => window.darkness * 0.15)",
+        "  .blend(src(o0).scrollX(0.003), 0.85)",
+        "  .out(o0)",
+        "render(o0)"
+      ],
+      "tweaks": [
+        "Raise the 0.15 for a more violent reaction to black frames.",
+        "Invert (window.darkness -> avg) to instead glitch only BRIGHT frames.",
+        "clearInterval(window._probe) stops the probe when you are done."
+      ]
+    },
+    {
+      "id": "c2-scene-ripper-faces-bridge",
+      "step": 3,
+      "title": "C2 - bridge ONE Scene Ripper detection (faces) into ONE Hydra param",
+      "goal": "Make the visual content-aware: Scene Ripper's face detection drives the glitch amount in real time. The signature combo move.",
+      "requires": [
+        "Scene Ripper side: run a small local WebSocket server that pushes analysis results as JSON containing a faces count (e.g. from person_count / face detection).",
+        "Hydra side (below) connects to it and stashes the count in a global the chain reads each frame.",
+        "Point Hydra at the SAME stream Scene Ripper is analyzing."
+      ],
+      "code": [
+        "// C2 - Scene Ripper face count -> Hydra glitch amount, via WebSocket",
+        "// Scene Ripper pushes JSON with a faces field; we stash it globally.",
+        "if (window._ws) window._ws.close()",
+        "window.faceCount = 0",
+        "window._ws = new WebSocket('ws://localhost:8765')",
+        "window._ws.onmessage = (e) => {",
+        "  try { window.faceCount = JSON.parse(e.data).faces || 0 } catch (err) {}",
+        "}",
+        "",
+        "s0.initScreen()   // the SAME stream Scene Ripper is analyzing",
+        "",
+        "// more faces on screen -> more glitch (capped so it stays watchable)",
+        "src(s0)",
+        "  .modulate(o0, () => Math.min(window.faceCount, 8) * 0.012)",
+        "  .blend(src(o0).scrollX(0.003), 0.85)",
+        "  .out(o0)",
+        "render(o0)"
+      ],
+      "tweaks": [
+        "Swap .faces for any field Scene Ripper sends: object count, OCR hits, shot-type change, brightness, person_count.",
+        "Map to a different param instead of modulate: pixelate, kaleid, invert, saturate.",
+        "If no server yet, set window.faceCount by hand in the editor to test the visual response."
+      ],
+      "scene_ripper_hint": "A minimal emitter: run a websockets server in the Scene Ripper analysis worker and send_json({'faces': clip.person_count}) per analyzed frame/clip. Any detection field on Clip/Frame maps the same way."
+    },
+    {
+      "id": "step4-venue-decision",
+      "step": 4,
+      "title": "Decide venue early (gallery vs. online) - sets the legal contour",
+      "goal": "Not code. The distribution channel decides your exposure to Content ID, DMCA, ToS, and privacy, so choose before you build.",
+      "code": null,
+      "notes": [
+        "Gallery / installation / live performance = lowest exposure (no automated takedown surface).",
+        "Private link = medium. Public upload (incl. your own documentation) = highest: Content ID + DMCA act first, ask later.",
+        "Capture (initScreen/OBS) over scraping/.m3u8 ripping to soften ToS risk.",
+        "Strip or replace original audio to remove the most common automated tripwire (music Content ID).",
+        "Transform hard (the glitch IS the defense): fragmented, recontextualized = transformative use; reposting = not.",
+        "See clip-farming-tools-and-money.txt and the ethics notes for the full breakdown."
+      ]
+    }
+  ]
+}

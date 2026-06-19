@@ -1,0 +1,255 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Focal points (PixelCrash-style)</title>
+<link rel="icon" href="data:,">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #fff; font-family: system-ui, sans-serif; }
+  /* the captured stream, melted into soft color via CSS filter (set live in JS) */
+  #bg { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: fill; }
+  #ov { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 5; pointer-events: none; }
+  #panel {
+    position: fixed; top: 12px; left: 12px; z-index: 10;
+    display: flex; flex-direction: column; gap: 8px;
+    background: rgba(0,0,0,0.55); padding: 10px 12px; border-radius: 8px;
+    color: #ddd; font-size: 13px; backdrop-filter: blur(6px); max-width: 320px;
+  }
+  #bar { display: flex; gap: 8px; align-items: center; }
+  #panel button {
+    background: #1a1a1a; color: #eee; border: 1px solid #444;
+    border-radius: 6px; padding: 6px 10px; font-size: 13px; cursor: pointer;
+  }
+  #panel button:hover { border-color: #888; }
+  #hint { opacity: 0.75; line-height: 1.3; }
+  #hint.err { color: #ff8a8a; opacity: 1; }
+  #panel.hidden { opacity: 0; pointer-events: none; transition: opacity .4s; }
+  #toggle {
+    position: fixed; top: 12px; left: 12px; z-index: 11;
+    width: 30px; height: 30px; border-radius: 6px; cursor: pointer;
+    background: rgba(0,0,0,0.55); color: #eee; border: 1px solid #444;
+    font-size: 16px; line-height: 1; backdrop-filter: blur(6px); display: none;
+  }
+  #knobs { display: flex; flex-direction: column; gap: 5px; }
+  .knob { display: grid; grid-template-columns: 64px 1fr 38px; gap: 8px; align-items: center; }
+  .knob label { opacity: 0.8; }
+  .knob input[type=range] { width: 100%; }
+  .knob .val { opacity: 0.7; text-align: right; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<video id="bg" autoplay muted playsinline></video>
+<canvas id="ov"></canvas>
+<button id="toggle" title="Show controls">&#8801;</button>
+
+<div id="panel">
+  <div id="bar"><button id="run">Run</button><button id="hide">Hide</button></div>
+  <div id="knobs"></div>
+  <span id="hint"></span>
+</div>
+
+<script>
+const hint  = document.getElementById('hint');
+const panel = document.getElementById('panel');
+function say(m, err) { hint.textContent = m; hint.classList.toggle('err', !!err); }
+
+// ---------------------------------------------------------------------------
+// Live params.
+// ---------------------------------------------------------------------------
+const PARAMS = { blur: 26, saturate: 2.0, points: 9, box: 1.0, web: 2, smooth: 0.08, ink: 0.7 };
+const KNOBS = [
+  { key: 'blur',     label: 'Blur',     min: 0,   max: 80,  step: 1,    fmt: v => v.toFixed(0) },
+  { key: 'saturate', label: 'Saturate', min: 1,   max: 4,   step: 0.05, fmt: v => v.toFixed(2) },
+  { key: 'points',   label: 'Points',   min: 3,   max: 16,  step: 1,    fmt: v => v.toFixed(0) },
+  { key: 'box',      label: 'Box size', min: 0.5, max: 2.5, step: 0.05, fmt: v => v.toFixed(2) },
+  { key: 'web',      label: 'Web',      min: 0,   max: 4,   step: 1,    fmt: v => v.toFixed(0) },
+  { key: 'smooth',   label: 'Drift',    min: 0.02,max: 0.4, step: 0.01, fmt: v => v.toFixed(2) },
+  { key: 'ink',      label: 'Ink',      min: 0,   max: 1,   step: 0.05, fmt: v => v.toFixed(2) },
+];
+
+const video = document.getElementById('bg');
+const ov    = document.getElementById('ov');
+const octx  = ov.getContext('2d');
+
+// small offscreen canvas for saliency (high-chroma focal points)
+const GW = 96, GH = 54;
+const sc  = document.createElement('canvas'); sc.width = GW; sc.height = GH;
+const sctx = sc.getContext('2d', { willReadFrequently: true });
+
+let tracked = [];   // {x,y,w,h, tx,ty,tw,th}  screen coords; t* = target
+let running = false, frame = 0;
+
+// ---------------------------------------------------------------------------
+// Capture the tab (getDisplayMedia DOES await the picker, unlike Hydra).
+// ---------------------------------------------------------------------------
+async function startCapture() {
+  say('Pick the Kick tab in the share dialog...');
+  const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+  video.srcObject = stream;
+  await new Promise(res => { if (video.readyState >= 1) res(); else video.onloadedmetadata = () => res(); });
+  await video.play();
+  say('Running. Boxes track the image focal points.');
+}
+
+// ---------------------------------------------------------------------------
+// Saliency: downscale the video, score each cell by chroma (vividness),
+// then greedily pick the most vivid, non-overlapping peaks as focal points.
+// ---------------------------------------------------------------------------
+function detectFocalPoints(n) {
+  sctx.drawImage(video, 0, 0, GW, GH);
+  const data = sctx.getImageData(0, 0, GW, GH).data;
+  const chroma = new Float32Array(GW * GH);
+  for (let i = 0; i < GW * GH; i++) {
+    const r = data[i*4], g = data[i*4+1], b = data[i*4+2];
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+    chroma[i] = (mx - mn) * (mx / 255);   // vivid AND bright
+  }
+  const ch = (x, y) => (x < 0 || y < 0 || x >= GW || y >= GH) ? 0 : chroma[y*GW + x];
+  // candidate cells sorted by score
+  const cand = [];
+  for (let i = 0; i < GW * GH; i++) cand.push(i);
+  cand.sort((a, b) => chroma[b] - chroma[a]);
+  const picked = [], minDist = 7;   // grid cells apart
+  for (const i of cand) {
+    if (picked.length >= n) break;
+    const x = i % GW, y = (i / GW) | 0;
+    if (chroma[i] < 12) break;       // nothing vivid enough left
+    if (picked.some(p => Math.abs(p.gx - x) < minDist && Math.abs(p.gy - y) < minDist)) continue;
+    // rough blob extent: expand while chroma stays above 40% of the peak
+    const thr = chroma[i] * 0.4;
+    let x0 = x, x1 = x, y0 = y, y1 = y;
+    while (x0 > 0 && ch(x0-1, y) > thr) x0--;
+    while (x1 < GW-1 && ch(x1+1, y) > thr) x1++;
+    while (y0 > 0 && ch(x, y0-1) > thr) y0--;
+    while (y1 < GH-1 && ch(x, y1+1) > thr) y1++;
+    picked.push({ gx: x, gy: y, gw: (x1 - x0 + 1), gh: (y1 - y0 + 1) });
+  }
+  // map grid -> screen coords
+  const W = ov.width, H = ov.height;
+  return picked.map(p => ({
+    x: (p.gx + 0.5) / GW * W,
+    y: (p.gy + 0.5) / GH * H,
+    w: Math.max(36, p.gw / GW * W),
+    h: Math.max(36, p.gh / GH * H),
+  }));
+}
+
+// greedy nearest-neighbour assignment so each tracked box keeps following the
+// same blob frame to frame (smooth drift, not random reshuffle)
+function assignTargets(targets) {
+  const used = new Array(targets.length).fill(false);
+  for (const t of tracked) {
+    let best = -1, bd = Infinity;
+    for (let k = 0; k < targets.length; k++) {
+      if (used[k]) continue;
+      const d = (t.x - targets[k].x) ** 2 + (t.y - targets[k].y) ** 2;
+      if (d < bd) { bd = d; best = k; }
+    }
+    if (best >= 0) { used[best] = true; const g = targets[best]; t.tx = g.x; t.ty = g.y; t.tw = g.w; t.th = g.h; }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Main loop.
+// ---------------------------------------------------------------------------
+function loop() {
+  if (!running) return;
+  // keep CSS filter + canvas size in sync with sliders / window
+  video.style.filter = `blur(${PARAMS.blur}px) saturate(${PARAMS.saturate}) contrast(1.35)`;
+  if (ov.width !== window.innerWidth)  ov.width  = window.innerWidth;
+  if (ov.height !== window.innerHeight) ov.height = window.innerHeight;
+
+  if (video.videoWidth) {
+    const N = Math.round(PARAMS.points);
+    // re-detect every 4th frame (cheaper); smooth toward targets every frame
+    if (frame % 4 === 0) {
+      const targets = detectFocalPoints(N);
+      // grow/shrink the tracked set toward N
+      while (tracked.length < Math.min(N, targets.length)) {
+        const g = targets[tracked.length];
+        tracked.push({ x: g.x, y: g.y, w: g.w, h: g.h, tx: g.x, ty: g.y, tw: g.w, th: g.h });
+      }
+      if (tracked.length > N) tracked.length = N;
+      assignTargets(targets);
+    }
+    const k = PARAMS.smooth;
+    for (const t of tracked) {
+      t.x += (t.tx - t.x) * k; t.y += (t.ty - t.y) * k;
+      t.w += (t.tw - t.w) * k; t.h += (t.th - t.h) * k;
+    }
+    drawOverlay();
+  }
+  frame++;
+  requestAnimationFrame(loop);
+}
+
+function drawOverlay() {
+  const W = ov.width, H = ov.height;
+  octx.clearRect(0, 0, W, H);
+  const ink = `rgba(30,30,30,${PARAMS.ink})`;
+  const boxF = PARAMS.box;
+
+  // dashed curvy web: connect each point to its nearest few neighbours
+  if (PARAMS.web > 0 && tracked.length > 1) {
+    octx.setLineDash([6, 5]); octx.lineWidth = 1; octx.strokeStyle = `rgba(40,40,40,${PARAMS.ink * 0.6})`;
+    const drawn = new Set();
+    for (let i = 0; i < tracked.length; i++) {
+      const order = tracked.map((p, j) => ({ j, d: (p.x - tracked[i].x) ** 2 + (p.y - tracked[i].y) ** 2 }))
+        .filter(o => o.j !== i).sort((a, b) => a.d - b.d).slice(0, PARAMS.web);
+      for (const o of order) {
+        const key = i < o.j ? i + '-' + o.j : o.j + '-' + i;
+        if (drawn.has(key)) continue; drawn.add(key);
+        const a = tracked[i], c = tracked[o.j];
+        const mx = (a.x + c.x) / 2, my = (a.y + c.y) / 2;
+        const dx = c.x - a.x, dy = c.y - a.y, len = Math.hypot(dx, dy) || 1;
+        const bow = ((i * 37 + o.j * 17) % 100 / 100 * 2 - 1);   // stable per pair
+        const cpx = mx + (-dy / len) * bow * len * 0.18;
+        const cpy = my + ( dx / len) * bow * len * 0.18;
+        octx.beginPath(); octx.moveTo(a.x, a.y); octx.quadraticCurveTo(cpx, cpy, c.x, c.y); octx.stroke();
+      }
+    }
+    octx.setLineDash([]);
+  }
+
+  // boxes + center dots + coordinate labels
+  octx.lineWidth = 1; octx.strokeStyle = ink; octx.fillStyle = ink;
+  octx.font = '11px ui-monospace, Menlo, monospace';
+  for (const t of tracked) {
+    const w = t.w * boxF, h = t.h * boxF;
+    const x = t.x - w / 2, y = t.y - h / 2;
+    octx.strokeRect(x, y, w, h);
+    octx.beginPath(); octx.arc(t.x, t.y, 1.6, 0, Math.PI * 2); octx.fill();   // center dot
+    const vx = Math.round(t.x / W * video.videoWidth);
+    const vy = Math.round(t.y / H * video.videoHeight);
+    octx.fillText(`x:${vx} y:${vy}`, x + 2, y - 4);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Sliders + UI.
+// ---------------------------------------------------------------------------
+const knobsEl = document.getElementById('knobs');
+for (const k of KNOBS) {
+  const row = document.createElement('div'); row.className = 'knob';
+  const lab = document.createElement('label'); lab.textContent = k.label;
+  const inp = document.createElement('input');
+  inp.type = 'range'; inp.min = k.min; inp.max = k.max; inp.step = k.step; inp.value = PARAMS[k.key];
+  const val = document.createElement('span'); val.className = 'val'; val.textContent = k.fmt(PARAMS[k.key]);
+  inp.addEventListener('input', () => { PARAMS[k.key] = parseFloat(inp.value); val.textContent = k.fmt(PARAMS[k.key]); });
+  row.append(lab, inp, val); knobsEl.appendChild(row);
+}
+
+const toggle = document.getElementById('toggle');
+function setPanel(v) { panel.classList.toggle('hidden', !v); toggle.style.display = v ? 'none' : 'block'; }
+document.getElementById('run').addEventListener('click', async () => {
+  try { await startCapture(); if (!running) { running = true; loop(); } }
+  catch (e) { say('Error: ' + e.message, true); console.error(e); }
+});
+document.getElementById('hide').addEventListener('click', () => setPanel(false));
+toggle.addEventListener('click', () => setPanel(true));
+window.addEventListener('keydown', e => { if (e.key === 'Escape') setPanel(panel.classList.contains('hidden')); });
+
+say('Click Run, pick the Kick tab. The image melts into color; boxes track its focal points.');
+</script>
+</body>
+</html>
